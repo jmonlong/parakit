@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "parakit"
+version = "0.0.1"
+authors = [
+  { name="Jean Monlong", email="jean.monlong@inserm.fr" },
+]
+description = "Parakit"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = ["networkx", "biopython"]
+
+[project.urls]
+Homepage = "https://github.com/jmonlong/parakit"
+Issues = "https://github.com/jmonlong/parakit/issues"
+
+[project.scripts]
+parakit = "parakit.main:main"
+
+# [tool.hatch.build.targets.wheel.force-include]
+# "scripts" = "parakit/scripts"

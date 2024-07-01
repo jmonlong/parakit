@@ -1,0 +1,9 @@
+{
+    "ref_fa": "genomedata/hg38.fa",
+    "c1": "chr6:31980532-32013273",
+    "c2": "chr6:32013273-32046127",
+    "flank_size": 300000,
+    "method": "mc",
+    "hprc_agc": "genomedata/HPRC-yr1.agc",
+    "hprc_coords": "hprc.cyp21a.coords.tsv"
+}
