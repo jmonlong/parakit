@@ -1,6 +1,6 @@
 # Parakit
 
-![](parakit.logo.svg)
+<img src="parakit.logo.svg" width="200">
 
 Parakit is a tool to analyze the RCCX module, which contain the CYP21A2 gene, using long sequencing reads. 
 It is still in active development and is currently focusing on ONT R10 data. 
