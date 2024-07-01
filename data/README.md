@@ -47,7 +47,7 @@ Making this file is not automated yet.
 ### Run
 
 ```sh
-parakit construct -j pg.config.mc.cyp21a2.json -o rccx.grch38_hprc.mc
+parakit construct -j rccx.grch38_hprc.mc.config.json -o rccx.grch38_hprc.mc
 ```
 
 Will create two output files:
