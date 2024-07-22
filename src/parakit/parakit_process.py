@@ -215,7 +215,10 @@ def constructPgPggb(config, opref, pg_gfa, threads=1):
         if fn.endswith('smooth.final.gfa'):
             cp_cmd = ['cp', pggb_outdir + '/' + fn, pg_gfa]
             subprocess.run(cp_cmd, check=True)
-    # refname might be different when using pggb?
+    # remove temporary files
+    for ff in [pggb_sh_fn, full_fa_fn, full_fa_fn + '.fai']:
+        os.remove(ff)
+    # os.removedirs(pggb_outdir)  # not sure if we want to do this, some nice plots in there
     return ({'refname': 'ref'})
 
 
