@@ -16,6 +16,8 @@ pars_construct = spars.add_parser('construct',
 pars_construct.add_argument('-j', help='config JSON file', required=True)
 pars_construct.add_argument('-o', help='prefix for the output files',
                             default='')
+pars_construct.add_argument('-t', default=4, type=int,
+                            help='number of threads to use')
 pars_construct.set_defaults(scmd='construct')
 
 # map subcommand: map reads to the pangenome
@@ -40,7 +42,7 @@ pars_call.add_argument('-m', help='number of markers checked around the SNPs',
 pars_call.add_argument('-o', help='output TSV', required=True)
 pars_call.set_defaults(scmd='call')
 
-# paths subcommand: variant pathss by aggregating read support
+# paths subcommand: variant paths by aggregating read support
 pars_paths = spars.add_parser('paths',
                               help='find paths best supported by reads')
 pars_paths.add_argument('-n', help='node information', required=True)
@@ -50,6 +52,20 @@ pars_paths.add_argument('-o', help='output TSV prefix', required=True)
 pars_paths.add_argument('-c', default=4, type=float,
                         help='minimum read support for subread clustering.')
 pars_paths.set_defaults(scmd='paths')
+
+# annotate subcommand: annotate sequence(s) from a FASTA file
+pars_annotate = spars.add_parser('annotate',
+                                 help='annotate sequence(s) from a FASTA file')
+pars_annotate.add_argument('-j', help='config JSON file', required=True)
+pars_annotate.add_argument('-n', help='node information', required=True)
+pars_annotate.add_argument('-g', help='input GFA pangenome', required=True)
+pars_annotate.add_argument('-f', help='input fasta file', required=True)
+pars_annotate.add_argument('-o', help='output PDF file', required=True)
+pars_annotate.add_argument('-e', help='input genome element annotation TSV',
+                           required=True)
+pars_annotate.add_argument('-r', default='', help='input alignments in GAF')
+pars_annotate.add_argument('-t', help='debug trace mode', action='store_true')
+pars_annotate.set_defaults(scmd='annotate')
 
 # paths subcommand: variant pathss by aggregating read support
 pars_viz = spars.add_parser('viz', help='visualize the results')
@@ -87,19 +103,25 @@ def scmd_construct(args):
     # prepare names of output files
     pg_gfa = opref + '.pg.gfa'
     node_tsv = opref + '.node_info.tsv'
-    # prepare files and run pangenome construction
-    if config['method'] == 'mc':
-        # use minigraph-cactus
-        cons_proc = pkproc.constructPgMc(config, opref, pg_gfa)
-    elif config['method'] == 'pggb':
-        # use PGGB
-        cons_proc = pkproc.constructPgPggb(config, opref, pg_gfa)
-    refname = cons_proc['refname']
+    refname = 'ref'
+    if os.path.isfile(pg_gfa):
+        print("{} exists. Skipping pangenome construction.".format(pg_gfa))
+    else:
+        # prepare files and run pangenome construction
+        if config['method'] == 'mc':
+            # use minigraph-cactus
+            cons_proc = pkproc.constructPgMc(config, opref, pg_gfa)
+        elif config['method'] == 'pggb':
+            # use PGGB
+            cons_proc = pkproc.constructPgPggb(config, opref, pg_gfa,
+                                               threads=args.t)
+        refname = cons_proc['refname']
     # annotate the nodes in the graph
-    pkio.readGFA(pg_gfa, refname=refname, out_tsv=node_tsv)
+    pkio.readGFA(pg_gfa, refname=refname, out_tsv=node_tsv,
+                 guess_modules=config['method'] == 'pggb')
     # done
     print('Output GFA: ' + pg_gfa)
-    print('Node  information: ' + node_tsv)
+    print('Node information: ' + node_tsv)
 
 
 def scmd_map(args):
@@ -220,6 +242,27 @@ def scmd_paths(args):
     outf.close()
 
 
+def scmd_annotate(args):
+    # read config json file
+    config = json.load(open(args.j, 'rt'))
+    # map fasta sequence(s) to pangenome
+    gaf_fn = args.f + '.' + config['method'] + '.gaf.gz'
+    if args.r != '':
+        print('Using {}. No alignment needed.'.format(args.r))
+    elif os.path.isfile(gaf_fn):
+        print('{} exists. Skipping alignment to the pangenome'.format(gaf_fn))
+        args.r = gaf_fn
+    else:
+        print('Aligning {} to pangenome...'.format(args.f))
+        pkproc.mapReads(args.f, args.g, gaf_fn)
+        print('Output GAF: ' + gaf_fn)
+        args.r = gaf_fn
+    # visualize
+    script_path = os.path.join(os.path.dirname(__file__),
+                               'parakit.viz.R')
+    pkproc.runRscript(script_path, args)
+
+
 def scmd_viz(args):
     # read config json file
     config = json.load(open(args.j, 'rt'))
@@ -244,3 +287,5 @@ def main():
         scmd_paths(args)
     elif args.scmd == 'viz':
         scmd_viz(args)
+    elif args.scmd == 'annotate':
+        scmd_annotate(args)

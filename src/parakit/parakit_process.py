@@ -1,10 +1,18 @@
 import parakit.parakit_io as pkio
 import os
 import subprocess
-from Bio import SeqIO
-from Bio.SeqRecord import SeqRecord
-from Bio.Seq import MutableSeq
 import pyfaidx
+
+
+def writeFasta(outfn, seqn, seq, wrap=80):
+    faf = open("seqs/ref_full.fa", 'wt')
+    faf.write('>{}\n'.format(seqn))
+    seqii = 0
+    while seqii < len(seq):
+        seqjj = min(len(seq), seqii + wrap)
+        faf.write(seq[seqii:seqjj] + '\n')
+        seqii = seqjj
+    faf.close()
 
 
 def getRegionsFromConfig(config):
@@ -28,31 +36,17 @@ def prepareRefSeqsForMc(config):
     ref_fa = pyfaidx.Fasta(config['ref_fa'])
     c1, c2, reg_s, reg_e = getRegionsFromConfig(config)
     # write files for the SD-ome graph
-    recs = []
     seq = str(ref_fa[c1[0]][reg_s:reg_e])
-    recs.append(SeqRecord(MutableSeq(seq.upper()), id='ref', description=""))
-    SeqIO.write(recs, "seqs/ref_full.fa", "fasta")
-    recs = []
+    writeFasta("seqs/ref_full.fa", 'ref', seq.upper())
     seq = str(ref_fa[c1[0]][reg_s:c2[1][0]]) + \
         str(ref_fa[c1[0]][c2[1][1]:reg_e])
-    recs.append(SeqRecord(MutableSeq(seq.upper()),
-                          id='ref_noc2', description=""))
-    SeqIO.write(recs, "seqs/ref_noc2.fa", "fasta")
-    recs = []
+    writeFasta("seqs/ref_noc2.fa", 'ref_noc2', seq.upper())
     seq = str(ref_fa[c1[0]][c1[1][0]:c2[1][1]])
-    recs.append(SeqRecord(MutableSeq(seq.upper()),
-                          id='ref_c1c2', description=""))
-    SeqIO.write(recs, "seqs/ref_c1c2.fa", "fasta")
-    recs = []
+    writeFasta("seqs/ref_c1c2.fa", 'ref_c1c2', seq.upper())
     seq = str(ref_fa[c1[0]][c1[1][0]:c1[1][1]])
-    recs.append(SeqRecord(MutableSeq(seq.upper()),
-                          id='c1_ref', description=""))
-    SeqIO.write(recs, "seqs/c1_ref.fa", "fasta")
-    recs = []
+    writeFasta("seqs/c1_ref.fa", 'c1_ref', seq.upper())
     seq = str(ref_fa[c1[0]][c2[1][0]:c2[1][1]])
-    recs.append(SeqRecord(MutableSeq(seq.upper()),
-                          id='c2_ref', description=""))
-    SeqIO.write(recs, "seqs/c2_ref.fa", "fasta")
+    writeFasta("seqs/c2_ref.fa", 'c2_ref', seq.upper())
 
 
 def prepareHprcSeqsForMc(config):
@@ -154,17 +148,75 @@ def constructPgMc(config, opref, pg_gfa):
     return ({'refname': 'ref'})
 
 
-def constructPgPggb(config, opref, pg_gfa):
-    # use PGGB    
-    # docker run -it -v `pwd`:/app -w /app -u `id -u $USER` ghcr.io/pangenome/pggb:latest
-    # cat seqs/ref.fa seqs/ref.b.fa > in.fa
-    # samtools faidx in.fa
-    # pggb -i in.fa -o pggb.out -n 2 -c 2 -t 4
-    cmd = ['docker run -it -v `pwd`:/app -w /app -u `id -u $USER` ghcr.io/pangenome/pggb:latest']
-    subprocess.run(cmd, check=True)
+def prepareRefSeqsForPggb(config):
+    print('Extracting reference sequences.')
+    ref_fa = pyfaidx.Fasta(config['ref_fa'])
+    c1, c2, reg_s, reg_e = getRegionsFromConfig(config)
+    seq = str(ref_fa[c1[0]][reg_s:reg_e])
+    writeFasta("seqs/ref_full.fa", 'ref', seq.upper())
+    return ("seqs/ref_full.fa")
+
+
+def prepareHprcSeqsForPggb(config):
+    hprc_seqs_for_pggb = []
+    coord_inf = open(config['hprc_coords'], 'rt')
+    for line in coord_inf:
+        [samp, coord] = line.rstrip().split('\t')
+        out_fa = 'seqs/' + samp + '.fa'
+        if os.path.isfile(out_fa):
+            print('{} already exists, skipping...'.format(out_fa))
+        else:
+            print('Extracting HPRC sequence {} at {}.'.format(samp, coord))
+            agc_cmd = ['agc',  'getctg', config['hprc_agc'], coord]
+            agc_o = subprocess.run(agc_cmd, check=True, capture_output=True)
+            out_file = open(out_fa, 'wt')
+            for ii, line in enumerate(agc_o.stdout.decode().split('\n')):
+                if ii == 0:
+                    out_file.write('>' + samp + '\n')
+                else:
+                    out_file.write(line + '\n')
+            out_file.close()
+        hprc_seqs_for_pggb.append(out_fa)
+    coord_inf.close()
+    return (hprc_seqs_for_pggb)
+
+
+def constructPgPggb(config, opref, pg_gfa, threads=1):
+    fa_files = []
+    # prepare reference sequence(s)
+    fa_files.append(prepareRefSeqsForPggb(config))
+    # prepare local sequences from HPRC
+    if 'hprc_agc' in config and 'hprc_coords' in config:
+        fa_files += prepareHprcSeqsForPggb(config)
+    # script to run PGGB
+    pggb_sh_fn = opref + '.for_pggb.sh'
+    pggb_outdir = opref + '.output'
+    pggb_sh_f = open(pggb_sh_fn, 'wt')
+    full_fa_fn = opref + '.for_pggb.fa'
+    pggb_sh_f.write('cat {} > {}\n'.format(' '.join(fa_files), full_fa_fn))
+    pggb_sh_f.write('samtools faidx {}\n'.format(full_fa_fn))
+    pggb_sh_f.write('rm -rf {}\n'.format(pggb_outdir))
+    pggb_sh_f.write('pggb -i {} -o {} -n {} -c 2 -t {}\n'.format(full_fa_fn,
+                                                                 pggb_outdir,
+                                                                 len(fa_files),
+                                                                 threads))
+    pggb_sh_f.close()
+    # get USER id to make sure the file permission are correct with docker
+    id_o = subprocess.run(['id', '-u', os.getenv('USER')],
+                          check=True, capture_output=True)
+    pggb_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
+                '-w', '/app',
+                '-u', id_o.stdout.decode().rstrip(),
+                'ghcr.io/pangenome/pggb:latest',
+                'sh', pggb_sh_fn]
+    subprocess.run(pggb_cmd, check=True)
     # move/copy final GFA to pg_gfa
+    for fn in os.listdir(pggb_outdir):
+        if fn.endswith('smooth.final.gfa'):
+            cp_cmd = ['cp', pggb_outdir + '/' + fn, pg_gfa]
+            subprocess.run(cp_cmd, check=True)
     # refname might be different when using pggb?
-    return ({'refname': ''})
+    return ({'refname': 'ref'})
 
 
 def extractReads(config, in_reads, out_fq):
@@ -198,7 +250,7 @@ def mapReads(in_fq, pg_gfa, out_gaf):
               '-u', id_o.stdout.decode().rstrip(),
               'quay.io/biocontainers/graphaligner:1.0.17b--h21ec9f0_2',
               'GraphAligner', '-g', pg_gfa, '-f', in_fq, '-a', ga_gaf,
-              '-x', 'vg']
+              '-x', 'vg', '-b', '100']
     subprocess.run(ga_cmd, check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if out_gaf.endswith('.gz'):
@@ -210,11 +262,7 @@ def mapReads(in_fq, pg_gfa, out_gaf):
         os.remove(ga_gaf)
 
 
-def runRscript(config, script_r, args, annotate_gaf=''):
-    # get offset from config file
-    c1, c2, pos_offset, reg_e = getRegionsFromConfig(config)
-    pos_offset += 1
-
+def runRscript(script_r, args):
     # visualization mode
     v_mode = 'annotate'
     if 'v' in args:
@@ -226,7 +274,7 @@ def runRscript(config, script_r, args, annotate_gaf=''):
         out_pdf = os.path.join(out_pdf, '.pdf')
 
     # run R script
-    rscript_cmd = ['Rscript', script_r, '-s', str(pos_offset), '-v', v_mode,
+    rscript_cmd = ['Rscript', script_r, '-j', args.j, '-v', v_mode,
                    '-n', args.n, '-e', args.e, '-o', out_pdf]
 
     # add arguments if provided
@@ -241,7 +289,7 @@ def runRscript(config, script_r, args, annotate_gaf=''):
             print('This visualization mode requires calls input (-c).')
             exit(1)
         rscript_cmd += ['-c', args.c]
-    if v_mode in ['all', 'all_small', 'calls', 'allele_support']:
+    if v_mode in ['all', 'all_small', 'calls', 'allele_support', 'annotate']:
         if args.r == '':
             print('This visualization mode requires reads input (-r).')
             exit(1)
@@ -265,7 +313,7 @@ def runRscript(config, script_r, args, annotate_gaf=''):
                                                  reads.startpos[readn][nii],
                                                  reads.endpos[readn][nii],
                                                  reads.readpos[readn][nii]))
-            if any_cspec:
+            if any_cspec or v_mode == 'annotate':
                 for tout in nodes_toprint:
                     outf.write(tout)
         outf.close()
@@ -275,9 +323,7 @@ def runRscript(config, script_r, args, annotate_gaf=''):
             print('This visualization mode requires paths input (-d and -p).')
             exit(1)
         rscript_cmd += ['-d', args.d, '-p', args.p]
-    if annotate_gaf != '':
-        rscript_cmd += ['-p', annotate_gaf]
-    if args.l != '':
+    if 'l' in args and args.l != '':
         rscript_cmd += ['-l', args.l]
 
     if args.t:

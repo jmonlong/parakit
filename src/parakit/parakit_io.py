@@ -166,38 +166,32 @@ def updateNodesSucsWithGFA(nodes, filen, verbose=True):
     inf.close()
 
 
-def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv=''):
+def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
+            guess_modules=False):
     # node info
     # for each node ID:
     #   size
     #   ref/c1/c2: number of times a ref/c1/c2 path traverses
     #   rpos_min/rpos_max: minimum/maximum position on the reference path
     ninfo = {}
-    # reference path
-    ref = []
-    # copy 1 (c1) and copy 2 (c2) paths
-    c1 = []
-    c2 = []
 
     # read GFA and parse info
+    # save paths
     inf = open(gfa_fn, 'rt')
+    paths = {}
     for line in inf:
         line = line.rstrip().split('\t')
-        if line[0] == 'P' and line[1] == refname:
-            # reference path was added by alignment+augment, hence is a P line
-            ref = line[2].replace('+', '').replace('-', '').split(',')
-        if line[0] == 'W':
-            # otherwise it's an allele of copy 1 or copy 2
-            path = line[6].replace('<', '>').split('>')[1:]
+        if line[0] == 'P':
+            path = line[2].replace('+', '').replace('-', '').split(',')
             # flip path if mostly traversing in reverse
+            if line[2].count('+') < line[2].count('-'):
+                path.reverse()
+            paths[line[1]] = path
+        if line[0] == 'W':
+            path = line[6].replace('<', '>').split('>')[1:]
             if line[6].count('>') < line[6].count('<'):
                 path.reverse()
-            # add the path to either c1 or c2 path list
-            seqn = line[3].split('_')
-            if seqn[0] == 'c1':
-                c1.append(path)
-            elif seqn[0] == 'c2':
-                c2.append(path)
+            paths[line[3]] = path
         # save some node information like size
         # also init, future fields
         if line[0] == 'S':
@@ -211,13 +205,10 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv=''):
                 ninfo[line[1]]['seq'] = line[2][:10] + '+'
     inf.close()
 
+    # reference path
+    ref = paths[refname]
+
     # update node info with path cover
-    for path in c1:
-        for nod in path:
-            ninfo[nod]['c1'] += 1
-    for path in c2:
-        for nod in path:
-            ninfo[nod]['c2'] += 1
     refpos = 0
     for nod in ref:
         ninfo[nod]['ref'] += 1
@@ -229,36 +220,33 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv=''):
         ninfo[nod]['rpos_max'] = max(refpos, ninfo[nod]['rpos_max'])
         refpos += ninfo[nod]['size']
 
-    # flag nodes if they are specific to copy 1 or copy 2
-    for pos, noden in enumerate(ninfo):
-        if ninfo[noden]['c1'] > min_fc * ninfo[noden]['c2']:
-            ninfo[noden]['class'] = 'c1'
-        if ninfo[noden]['c2'] > min_fc * ninfo[noden]['c1']:
-            ninfo[noden]['class'] = 'c2'
-        if ninfo[noden]['ref'] > 0 and ninfo[noden]['c1'] == 0 \
-           and ninfo[noden]['c2'] == 0:
-            ninfo[noden]['class'] = 'ref'
-
     # flag nodes contributing to the cycle edge
     # (end of copy 2 to beginning of copy 1)
-    cyc_edge_l = ''
-    cyc_edge_r = ''
-    for nod in ref:
-        if ninfo[nod]['rpos_max'] - ninfo[nod]['rpos_min'] > 0:
-            cyc_edge_r = nod
-            if cyc_edge_l == '':
-                cyc_edge_l = nod
-    ninfo[cyc_edge_l]['class'] = 'cyc_l'
-    ninfo[cyc_edge_r]['class'] = 'cyc_r'
+    cur_ref_path = []
+    cur_jump = 0
+    cur_max_jump = 0
+    for ii, nod in enumerate(ref):
+        if nod in cur_ref_path:
+            jump = ii - cur_ref_path.index(nod)
+            if jump > cur_jump:
+                cur_max_jump = ii
+                cur_jump = jump
+        cur_ref_path.append(nod)
+    cyc_end = ref[cur_max_jump]
+    cyc_start = ref[cur_max_jump - 1]
+    ninfo[cyc_end]['class'] = 'cyc_l'
+    ninfo[cyc_start]['class'] = 'cyc_r'
+    print('Guessing that the cycling edge is {}-{}'.format(cyc_start,
+                                                           cyc_end))
 
     # approximate ref position on non-reference paths as
     # the position of nearest ref node
     rpos_min = {}
     rpos_max = {}
-    for path in c1 + c2:
+    for pname in paths:
         cur_min = 0
         cur_max = 0
-        for nod in path:
+        for nod in paths[pname]:
             if ninfo[nod]['rpos_min'] != -1:
                 # if current node has a ref position
                 # update current value
@@ -287,6 +275,77 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv=''):
            nod in rpos_min:
             ninfo[nod]['rpos_min'] = int(statistics.median(rpos_min[nod]))
             ninfo[nod]['rpos_max'] = int(statistics.median(rpos_max[nod]))
+
+    # count how many time a node is traversed by modules 1 or 2
+    if guess_modules:
+        # here we first need to guess paths corresponding to the modules
+        # split each full path in "module" subpaths
+        modules = {}
+        for pname in paths:
+            modules[pname] = []
+            mod_path = []
+            for nod in paths[pname]:
+                if nod == cyc_end:
+                    # start a new module
+                    mod_path = [nod]
+                elif nod == cyc_start:
+                    # end a module
+                    modules[pname].append(mod_path)
+                    mod_path = []
+                elif len(mod_path) > 0:
+                    # currently recording a module
+                    mod_path.append(nod)
+        # update the node info with each module subpath
+        for pname in modules:
+            if pname == refname:
+                # print(modules[pname])
+                # easy for the reference, first module is module 1
+                # second module is module 2
+                for ii, path in enumerate(modules[pname]):
+                    if ii > 1:
+                        print("Warning: more than two modules in the"
+                              " reference?")
+                        continue
+                    # annotate the traversed nodes appropriately
+                    for nod in path:
+                        ninfo[nod]['c' + str(ii+1)] += 1
+            else:
+                for path in modules[pname]:
+                    # compare the module to the two reference subpaths
+                    # to guess which module it is
+                    m1_m = 0
+                    m2_m = 0
+                    for nod in path:
+                        if nod in modules[refname][0]:
+                            m1_m += 1
+                        if nod in modules[refname][1]:
+                            m2_m += 1
+                    modn = 'c1'
+                    if m2_m > m1_m:
+                        modn = 'c2'
+                    # annotate the traversed nodes appropriately
+                    for nod in path:
+                        ninfo[nod][modn] += 1
+    else:
+        for pname in paths:
+            if pname != refname:
+                # it's an allele of module 1 or module 2
+                modn = pname.split('_')[0]
+                # annotate the traversed nodes appropriately
+                for nod in paths[pname]:
+                    ninfo[nod][modn] += 1
+
+    # flag nodes if they are specific to copy 1 or copy 2
+    for pos, noden in enumerate(ninfo):
+        if ninfo[noden]['class'] != 'none':
+            continue
+        if ninfo[noden]['c1'] > min_fc * ninfo[noden]['c2']:
+            ninfo[noden]['class'] = 'c1'
+        if ninfo[noden]['c2'] > min_fc * ninfo[noden]['c1']:
+            ninfo[noden]['class'] = 'c2'
+        if ninfo[noden]['ref'] > 0 and ninfo[noden]['c1'] == 0 \
+           and ninfo[noden]['c2'] == 0:
+            ninfo[noden]['class'] = 'ref'
 
     # write node info as TSV
     if out_tsv != '':

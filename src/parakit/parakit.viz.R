@@ -4,12 +4,13 @@ suppressPackageStartupMessages(library(tidyr))
 suppressPackageStartupMessages(library(RColorBrewer))
 suppressPackageStartupMessages(library(GenomicRanges))
 suppressPackageStartupMessages(library(cowplot))
+suppressPackageStartupMessages(library(rjson))
 
 ## define arguments
 args = list()
 args$viz = list(arg='-v', desc='visualization mode')
 args$nodes = list(arg='-n', desc='node information in TSV')
-args$offset = list(arg='-s', desc='offset of the region', val=0)
+args$config = list(arg='-j', desc='config json')
 args$reads = list(arg='-r', desc='input alignments in TSV from "parakit readcov"')
 args$genes = list(arg='-e', desc='input genome element annotation TSV')
 args$calls = list(arg='-c', desc='calls TSV')
@@ -85,13 +86,17 @@ var.vl = NULL
 
 ## load node info
 ninfo = read.table(args$nodes$val, as.is=TRUE, header=TRUE)
+ninfo = subset(ninfo, ref + c1 + c2 > 0)
 
 ## offset for this region
-reg.offset = as.numeric(args$offset$val)
+config = fromJSON(file=args$config$val)
+c1_s = as.numeric(gsub('.+:(.+)-.+', '\\1', config$c1))
+c1_e = as.numeric(gsub('.+:.+-(.+)', '\\1', config$c1))
+reg.offset = 1 + c1_s - config$flank_size
 
 ## load read information
 reads.df = NULL
-if(args$viz$val %in% c('calls', 'all', 'all_small', 'allele_support')){
+if(args$viz$val %in% c('calls', 'all', 'all_small', 'allele_support', 'annotate')){
   reads.df = read.table(args$reads$val, as.is=TRUE, header=TRUE) %>%
     merge(ninfo)
 }
@@ -178,6 +183,11 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
 ## load gene elements annotation
 g.df = read.table(args$genes$val, as.is=TRUE, sep='\t', header=TRUE)
 
+## subset to specific genes if specified in the config
+if('genes' %in% names(config)){
+  g.df = subset(g.df, gene_name %in% config$genes)
+}
+
 ## make GRange objects for nodes and gene elements
 ninfo.min.gr = GRanges(g.df$chr[1], IRanges(ninfo$rpos_min, width=ninfo$size))
 ninfo.max.gr = GRanges(g.df$chr[1], IRanges(ninfo$rpos_max, width=ninfo$size))
@@ -199,7 +209,7 @@ g.df$nend = NA
 g.df$nend[ol$queryHits] = ol$nend
 
 ## annotate genes as being in module 1 or 2
-c1c2.lim = ninfo %>% filter(rpos_min<rpos_max) %>% summarize(pos=min(rpos_max)) %>% .$pos
+c1c2.lim = ninfo %>% filter(class=='cyc_l') %>% .$rpos_max
 g.df = g.df %>% mutate(module=ifelse(start-reg.offset<c1c2.lim, 'c1', 'c2'))
 
 ## start the ggplot object
@@ -382,52 +392,51 @@ if(args$viz$val %in% c('paths', 'all', 'all_small')){
 ##
 
 if(args$viz$val == 'annotate'){
-  ## load information for each predicted haplotype
-  haps = read.table(args$hpaths$val, as.is=TRUE, header=TRUE)
-
-  ## prep predicted haplotype paths
-  ggp.haps.df = haps %>% mutate(class=factor(class, c('c1', 'none', 'c2'), c('1', 'both', '2')),
-                                ntype=ifelse(class!='both', 'module-specific', 'shared'),
-                                hap=factor(hap, levels=unique(hap), labels=c('hap_1', 'hap_2'))) %>% 
-    filter(!is.na(class)) %>% arrange(class=='1', class=='2')
-
-  ## how much to vertically shift the points of different classes (for aesthetic purpose)
-  path.v.shift.haps = 20
-  ## "dot plot" visualization: x=pangenome position, y=haplotype position
-  ggp$annot = ggplot(ggp.haps.df, aes(x=node, y=ppos + path.v.shift.haps*(as.numeric(class) - 1),
-                                     color=class, alpha=ntype)) +
-    geom_point() +
-    scale_color_brewer(name='module', palette='Set1') +
-    scale_alpha_manual(values=c(.8,.05), name='node') + 
-    facet_grid(hap~., scales='free', space='free') + 
-    theme_bw() +
-    theme(strip.text.y=element_text(angle=0),
-          legend.position='top',
-          axis.text.x=element_blank(), axis.title.x=element_blank()) +
-    ylab('position in\npredicted haplotype')
-
   ## split paths visualization (like for reads above)
-  ggp.haps.s.df = haps %>% merge(ninfo) %>%
-    group_by(hap) %>% arrange(ppos) %>% do(splitPaths(.)) %>%
+  ggp.annot.df = reads.df %>%
+    group_by(read) %>% arrange(readpos) %>% do(splitPaths(.)) %>%
     ungroup %>% 
     mutate(class=factor(class, c('c1', 'none', 'c2'), c('1', 'both', '2')),
-           ntype=ifelse(class!='both', 'module-specific', 'shared'),
-           hap=factor(hap, levels=unique(hap), labels=c('hap_1', 'hap_2')))
+           ntype=ifelse(class!='both', 'module-specific', 'shared')) %>%
+    filter(!is.na(class))
   path.v.shift.reads = .2
-  ggp$annot.s = ggplot(ggp.haps.s.df, aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +
+  ggp$annot = ggplot(ggp.annot.df,
+                     aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +
     geom_point(aes(color=class, alpha=ntype)) +
     scale_color_brewer(name='module', palette='Set1') +
     scale_alpha_manual(values=c(.7,.05), name='node') +
     scale_y_continuous(breaks=1:10, expand=c(0,.3)) +
     ylab('path\npart') + xlab('node position in the pangenome') +
     theme_bw() + 
-    facet_grid(hap~., scales='free', space='free') + 
+    facet_grid(read~., scales='free', space='free') + 
     theme(legend.position='top',
           axis.text.y=element_text(size=6),
           strip.text.y=element_text(size=4, angle=0)) +
     guides(alpha=guide_legend(ncol=1),
            color=guide_legend(ncol=2),
            shape=guide_legend(ncol=1))
+
+  path.v.shift.reads = max(ggp.annot.df$readpos) * .02
+  ggp$annot = ggplot(ggp.annot.df,
+                     aes(x=node,
+                         y=readpos + path.v.shift.reads*(as.numeric(class) - 1),
+                         color=class, alpha=ntype)) +
+    geom_point() +
+    scale_color_brewer(name='module', palette='Set1') +
+    scale_alpha_manual(values=c(.8,.05), name='node') + 
+    facet_grid(read~., scales='free', space='free') + 
+    theme_bw() +
+    ylab('position in\ninput sequence') +
+    xlab('node position in the pangenome') + 
+    theme(legend.position='top',
+          axis.text.y=element_text(size=6),
+          strip.text.y=element_text(size=4, angle=0)) +
+    guides(alpha=guide_legend(ncol=1),
+           color=guide_legend(ncol=2),
+           shape=guide_legend(ncol=1))
+
+  ## save the x-axis boundaries for later
+  xlims_v = c(xlims_v, ggp.annot.df$node)
 }
 
 ## to make sure all panels have the same x-axis limits 
@@ -465,25 +474,29 @@ if(args$viz$val == 'allele_support'){
             ggp.xlims + nox,
             ggp$allele + 
             ggp.xlims + nox,
-            ggp$genes + ggp.xlims + labs(caption=args$label$val), ncol=1, align='v', rel_heights=c(1,1,1))
+            ggp$genes + ggp.xlims + labs(caption=args$label$val),
+            ncol=1, align='v', rel_heights=c(1,1,1))
 }
 
 if(args$viz$val == 'calls'){
   plot_grid(ggp$reads + 
             ggp.xlims + nox,
-            ggp$genes + ggp.xlims + labs(caption=args$label$val), ncol=1, align='v', rel_heights=c(4,1.8))
+            ggp$genes + ggp.xlims + labs(caption=args$label$val),
+            ncol=1, align='v', rel_heights=c(4,1.8))
 }
 
 if(args$viz$val == 'paths'){
   plot_grid(ggp$haps +
             ggp.xlims + nox,
-            ggp$genes + ggp.xlims + labs(caption=args$label$val), ncol=1, align='v', rel_heights=c(2,1))
+            ggp$genes + ggp.xlims + labs(caption=args$label$val),
+            ncol=1, align='v', rel_heights=c(2,1))
 }
 
 if(args$viz$val == 'annotate'){
   plot_grid(ggp$annot +
             ggp.xlims + nox,
-            ggp$genes + ggp.xlims + labs(caption=args$label$val), ncol=1, align='v', rel_heights=c(2,1))
+            ggp$genes + ggp.xlims + labs(caption=args$label$val),
+            ncol=1, align='v', rel_heights=c(2,1))
 }
 
 if(args$viz$val == 'all'){
@@ -496,7 +509,8 @@ if(args$viz$val == 'all'){
 }
 
 if(args$viz$val == 'all_small'){
-  plot_grid(ggp$reads + ggp.xlims + nox + theme(legend.title=element_text(size=8), legend.text=element_text(size=8)),
+  plot_grid(ggp$reads + ggp.xlims + nox + theme(legend.title=element_text(size=8),
+                                                legend.text=element_text(size=8)),
             ggp$coverage + ggp.xlims + nox,
             ggp$allele + ggp.xlims + nox,
             ggp$haps.s + guides(alpha=FALSE, color=FALSE) + ggp.xlims + nox,
