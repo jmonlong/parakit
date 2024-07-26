@@ -222,7 +222,7 @@ def constructPgPggb(config, opref, pg_gfa, threads=1):
     return ({'refname': 'ref'})
 
 
-def extractReads(config, in_reads, out_fq):
+def extractReads(config, in_reads, out_fq, trace=False):
     if os.path.isfile(out_fq):
         print("{} already exists. Using those"
               " extracted reads".format(out_fq))
@@ -231,10 +231,17 @@ def extractReads(config, in_reads, out_fq):
     reg = '{}:{}-{}'.format(c1[0], reg_s, reg_e)
     # run samtools
     temp_bam = out_fq + '.bam'
-    subprocess.run(['samtools', 'view', '-h', '-O', 'bam',
-                    '-o', temp_bam, in_reads, reg], check=True)
-    subprocess.run(['samtools', 'fastq', '-o', out_fq, '-0', out_fq, temp_bam],
-                   check=True)
+    extract_cmd = ['samtools', 'view', '-h', '-O', 'bam',
+                   '-o', temp_bam, in_reads, reg]
+    convert_cmd = ['samtools', 'fastq', '-o', out_fq, '-0', out_fq, temp_bam]
+    if trace:
+        subprocess.run(extract_cmd, check=True)
+        subprocess.run(convert_cmd, check=True)
+    else:
+        subprocess.run(extract_cmd, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(convert_cmd, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.remove(temp_bam)
 
 
@@ -257,7 +264,7 @@ def mapReads(in_fq, pg_gfa, out_gaf):
     subprocess.run(ga_cmd, check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if out_gaf.endswith('.gz'):
-        # if we wanted an gzipped output, zip the temporary GAF
+        # if we wanted a gzipped output, zip the temporary GAF
         out_gaf_f = open(out_gaf, 'w')
         subprocess.run(['gzip', '-c', ga_gaf], check=True, stdout=out_gaf_f)
         out_gaf_f.close()

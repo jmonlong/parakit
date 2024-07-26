@@ -1,6 +1,7 @@
 import gzip
 import statistics
 import parakit.parakit_class as pkc
+import os
 
 
 def readNodeInfo(filen, verbose=True):
@@ -392,3 +393,56 @@ def readVariantAnnotation(filen, nodes, offset):
                             nodes[nod]['clinvar_ref'] = []
                         nodes[nod]['clinvar_ref'].append(cvid)
     return ({'pos': vars_pos, 'node': vars_node})
+
+
+def gfaFile(fn, config, check_file=True):
+    if fn == '':
+        if 'label' in config:
+            fn = config['label'] + '.pg.gfa'
+            if not os.path.isfile(fn) and check_file:
+                fn = 'parakit.{}'.format(config['method'])
+        else:
+            fn = 'parakit.{}'.format(config['method'])
+    if not os.path.isfile(fn) and check_file:
+        print('Cannot find/guess GFA file: ' + fn)
+    return (fn)
+
+
+def nodeFile(fn, config, check_file=True):
+    if fn == '':
+        if 'label' in config:
+            fn = config['label'] + '.node_info.tsv'
+            if not os.path.isfile(fn) and check_file:
+                fn = 'parakit.{}.{}'.format(config['method'], 'node_info.tsv')
+        else:
+            fn = 'parakit.{}.{}'.format(config['method'], 'node_info.tsv')
+    if not os.path.isfile(fn) and check_file:
+        print('Cannot find/guess node file: ' + fn)
+    return (fn)
+
+
+def clinvarFile(fn, config, check_file=True):
+    if fn == '' and 'clinvar' in config:
+        fn = config['clinvar']
+    if not os.path.isfile(fn) and check_file:
+        print('Cannot find ClinVar annotation file: ' + fn +
+              '\nEither provide with -a or in the config json '
+              '("clinvar" field)')
+    return (fn)
+
+
+def geneFile(fn, config, check_file=True):
+    if fn == '' and 'gene_annot' in config:
+        fn = config['gene_annot']
+    if not os.path.isfile(fn) and check_file:
+        print('Cannot find gene annotation file: ' + fn +
+              '\nEither provide with -e or in the config json '
+              '("gene_annot" field)')
+    return (fn)
+
+
+def prefixFile(config):
+    fn = 'parakit.{}'.format(config['method'])
+    if 'label' in config:
+        fn = config['label']
+    return (fn)

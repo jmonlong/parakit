@@ -97,7 +97,7 @@ reg.offset = 1 + c1_s - config$flank_size
 ## load read information
 reads.df = NULL
 if(args$viz$val %in% c('calls', 'all', 'all_small', 'allele_support', 'annotate')){
-  reads.df = read.table(args$reads$val, as.is=TRUE, header=TRUE) %>%
+  reads.df = read.table(args$reads$val, as.is=TRUE, header=TRUE, comment.char="") %>%
     merge(ninfo)
 }
 
