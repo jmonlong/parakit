@@ -332,6 +332,8 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
             if pname != refname:
                 # it's an allele of module 1 or module 2
                 modn = pname.split('_')[0]
+                if modn not in ['c1', 'c2']:
+                    continue
                 # annotate the traversed nodes appropriately
                 for nod in paths[pname]:
                     ninfo[nod][modn] += 1
@@ -368,31 +370,118 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
 
 
 def readVariantAnnotation(filen, nodes, offset):
-    vars_pos = {}
-    vars_node = {}
-    with open(filen, 'rt') as inf:
-        heads = next(inf).rstrip().split('\t')
-        for line in inf:
-            line = line.rstrip().split('\t')
-            pos = int(line[heads.index('start')]) - offset
-            for nod in nodes:
-                if nodes[nod]['rpos_max'] == pos:
-                    cvid = '{}_{}_{}'.format(line[heads.index('id')],
-                                             line[heads.index('nuc.change')],
-                                             line[heads.index('prot.change')])
-                    if nodes[nod]['class'] == 'c1' and \
-                       nodes[nod]['seq'] == line[heads.index('alt')]:
-                        vars_pos[cvid] = pos
-                        vars_node[cvid] = nod
-                        if 'clinvar' not in nodes[nod]:
-                            nodes[nod]['clinvar'] = []
-                        nodes[nod]['clinvar'].append(cvid)
-                    elif (nodes[nod]['class'] == 'c2') or \
-                         (nodes[nod]['seq'] == line[heads.index('ref')]):
-                        if 'clinvar_ref' not in nodes[nod]:
-                            nodes[nod]['clinvar_ref'] = []
-                        nodes[nod]['clinvar_ref'].append(cvid)
-    return ({'pos': vars_pos, 'node': vars_node})
+    # for an edge, we'll save the clinvar ID(s) and if it's the ref/alt allele
+    # there might be multiple clinvar records sharing an
+    # edge (the ref allele edge) so save a list of clinvar info for each edge,
+    # e.g. for some:
+    # var_edges['nod1']['nod2'] = [{cvid: 'id1', 'ref': True},
+    #                              {cvid: 'id2', 'ref': True}]
+    var_edges = {}
+    # list potential starting nodes for the "variant" edges,
+    # i.e. on the reference path and with multiple successors
+    snodes = []
+    for nod in nodes:
+        if 'sucs' not in nodes[nod]:
+            continue
+        if nodes[nod]['ref'] > 1 and len(nodes[nod]['sucs']) > 1:
+            snodes.append(nod)
+    # read the input tsv file
+    inf = open(filen, 'rt')
+    heads = next(inf).rstrip().split('\t')
+    for line in inf:
+        # parse the line and get some info
+        line = line.rstrip().split('\t')
+        pos = int(line[heads.index('start')]) - offset
+        ref = line[heads.index('ref')]
+        alt = line[heads.index('alt')]
+        cvid = '{}_{}_{}'.format(line[heads.index('id')],
+                                 line[heads.index('nuc.change')],
+                                 line[heads.index('prot.change')])
+        # find a potential starting node as the one that ends exactly at pos
+        snode = ''
+        for nod in snodes:
+            # 'pos' should be the position of the base at the end of that node
+            if nodes[nod]['rpos_max'] + nodes[nod]['size'] == pos:
+                snode = nod
+        # skip if we didn't find a suitable starting node for the edge
+        if snode == '':
+            continue
+        # check the alleles spelled by that node's successors
+        next_nodes = list(nodes[snode]['sucs'].keys())
+        for nnod in next_nodes:
+            vedge = ''  # is it a ref or alt edge
+            # if no padding, looking for exact match in the SNV bubble
+            # note: currently doesn't work for MNPs with no padding base
+            if ref[0] != alt[0]:
+                if ref == nodes[nnod]['seq']:
+                    # reference allele of SNV
+                    vedge = 'ref'
+                elif alt == nodes[nnod]['seq']:
+                    # alternate allele of SNV
+                    vedge = 'alt'
+            else:
+                # padding, either insertion or deletion
+                # looking for exact match of the long allele
+                # assume the short allele is the other one
+                # (if on the reference path)
+                if alt[1:] == nodes[nnod]['seq'] and nodes[nnod]['ref'] < 2:
+                    # alternate allele of insertion
+                    vedge = 'alt'
+                elif ref[1:] == nodes[nnod]['seq'] and nodes[nnod]['ref'] > 1:
+                    print('node {}: ref {}'.format(nnod, nodes[nnod]['ref']))
+                    # reference allele of deletion
+                    vedge = 'ref'
+                elif nodes[nnod]['ref'] > 1:
+                    # the sequence doesn't match but if it's a node on the
+                    # reference path it might just be the "short" allele with
+                    # the deleted sequence (alt) or without the inserted
+                    # sequence (ref)
+                    if len(ref) < len(alt):
+                        # insertion so likely the reference allele
+                        vedge = 'ref'
+                    else:
+                        # deletion so likely the alt allele
+                        vedge = 'alt'
+            # if we found a match, save it to var_edges
+            if vedge == 'ref' or vedge == 'alt':
+                if snode not in var_edges:
+                    var_edges[snode] = {}
+                if nnod not in var_edges[snode]:
+                    var_edges[snode][nnod] = []
+                var_edges[snode][nnod].append({'cvid': cvid,
+                                               'ref': vedge == 'ref'})
+    inf.close()
+    # find variants with both a ref and alt edge
+    esum = {}
+    for nod1 in var_edges:
+        for nod2 in var_edges[nod1]:
+            for vcv in var_edges[nod1][nod2]:
+                cvid = vcv['cvid']
+                ved = '{}-{}'.format(nod1, nod2)
+                if cvid not in esum:
+                    esum[cvid] = {'ref': '-', 'alt': '-'}
+                if vcv['ref']:
+                    esum[cvid]['ref'] = ved
+                else:
+                    esum[cvid]['alt'] = ved
+    matched_variants = []
+    for varid in esum:
+        if esum[varid]['ref'] != '-' and esum[varid]['alt'] != '-':
+            matched_variants.append(varid)
+            print('      {}\t{}\t{}'.format(varid,
+                                            esum[varid]['ref'],
+                                            esum[varid]['alt']))
+    print("Matched {} input variants.".format(len(matched_variants)))
+    # only return info about those variants
+    var_edges_final = {}
+    for nod1 in var_edges:
+        var_edges_final[nod1] = {}
+        for nod2 in var_edges[nod1]:
+            var_edges_final[nod1][nod2] = []
+            for vcv in var_edges[nod1][nod2]:
+                if vcv['cvid'] in matched_variants:
+                    var_edges_final[nod1][nod2].append(vcv)
+    return (var_edges_final)
 
 
 def gfaFile(fn, config, check_file=True):
@@ -400,9 +489,9 @@ def gfaFile(fn, config, check_file=True):
         if 'label' in config:
             fn = config['label'] + '.pg.gfa'
             if not os.path.isfile(fn) and check_file:
-                fn = 'parakit.{}'.format(config['method'])
+                fn = 'parakit.{}.pg.gfa'.format(config['method'])
         else:
-            fn = 'parakit.{}'.format(config['method'])
+            fn = 'parakit.{}.pg.gfa'.format(config['method'])
     if not os.path.isfile(fn) and check_file:
         print('Cannot find/guess GFA file: ' + fn)
     return (fn)

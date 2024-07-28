@@ -36,6 +36,7 @@ pars_call = spars.add_parser('call',
 pars_call.add_argument('-j', help='config JSON file', required=True)
 pars_call.add_argument('-n', help='node information', default='')
 pars_call.add_argument('-r', help='input alignments in GAF', required=True)
+pars_call.add_argument('-g', help='input GFA pangenome', default='')
 pars_call.add_argument('-a', help='annotation file (e.g. from ClinVar)',
                        default='')
 pars_call.add_argument('-m', help='number of markers checked around the SNPs',
@@ -147,17 +148,18 @@ def scmd_call(args):
     node_fn = pkio.nodeFile(args.n, config, check_file=True)
     nodes = pkio.readNodeInfo(node_fn)
 
+    # update with edge information
+    pg_gfa = pkio.gfaFile(args.g, config, check_file=True)
+    pkio.updateNodesSucsWithGFA(nodes, pg_gfa)
+
     # read annotation
     clinvar_fn = pkio.clinvarFile(args.a, config, check_file=True)
-    anno = pkio.readVariantAnnotation(clinvar_fn, nodes, pos_offset)
-    print("   Matched " + str(len(anno['pos'])) + " input variants: ")
-    for varid in anno['pos']:
-        print('      n' + str(anno['pos'][varid]) + '\t' + varid)
+    vedges = pkio.readVariantAnnotation(clinvar_fn, nodes, pos_offset)
 
     # read GAF
     reads = pkio.readGAF(args.r, nodes)
 
-    var_calls = pkvar.findVariants(nodes, anno, reads,
+    var_calls = pkvar.findVariants(nodes, vedges, reads,
                                    nmarkers=args.m,
                                    pos_offset=pos_offset)
     var_reads_f = var_calls['var_reads_f']
@@ -165,18 +167,19 @@ def scmd_call(args):
     fus_reads_f = var_calls['fus_reads_f']
     read_sum = var_calls['read_sum']
     cand_func_reads = var_calls['cand_func_reads']
+    var_node = var_calls['var_node']
 
     # print read support summary
     print("Covered variants and their supporting reads:\n")
     # order variants by position
-    var_names = sorted(list(var_reads_f), key=lambda k: anno['pos'][k])
-    if len(fus_reads_f) > 0:
-        var_names += list(fus_reads_f)
+    var_names = sorted(list(var_reads_f) + list(fus_reads_f),
+                       key=lambda k: nodes[var_node[k]]['rpos_max'])
+    # prepare TSV output
     for_tsv = ['\t'.join(['read', 'variant', 'node', 'allele'])]
     for read in list(read_sum.keys()) + list(cand_func_reads.keys()):
         to_print = read + '\t'
         for varid in var_names:
-            for_tsv_r = '\t'.join([read, varid, anno['node'][varid]])
+            for_tsv_r = '\t'.join([read, varid, var_node[varid]])
             if read not in read_sum or varid not in read_sum[read]:
                 # check if the read support a reference node for this variant
                 if varid in var_reads_ref and read in var_reads_ref[varid]:
@@ -195,7 +198,7 @@ def scmd_call(args):
     print()
 
     # write TSV output
-    print('Writing summary in TSV ' + args.o + '...')
+    print('Writing summary in ' + args.o + ' TSV...')
     with open(args.o, 'wt') as outf:
         outf.write('\n'.join(for_tsv) + '\n')
 
