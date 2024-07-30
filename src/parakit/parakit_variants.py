@@ -1,4 +1,5 @@
-def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0):
+def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
+                 output_tsv='calls.tsv'):
     # look for read support for variant edges in vedges
     var_reads = {}
     var_reads_ref = {}
@@ -67,7 +68,8 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0):
                     read_sum[read] = {}
                 read_sum[read][varid] = True
 
-    # to record the node associate with a variant (for reporting later)
+    # to record the two nodes associated with the alt edge of a variant
+    # (for reporting later)
     var_node = {}
     # for fusions we'll only look for breakpoint after the ealiest clinvar
     # variant (minus 1kb say)
@@ -75,7 +77,8 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0):
     for nod1 in vedges:
         for nod2 in vedges[nod1]:
             for ve in vedges[nod1][nod2]:
-                var_node[ve['cvid']] = nod2
+                if not ve['ref']:
+                    var_node[ve['cvid']] = [nod1, nod2]
                 min_pos_var.append(nodes[nod2]['rpos_max'])
     min_pos_var = min(min_pos_var) - 1000
 
@@ -138,7 +141,7 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0):
             fus_n = '{}_FUS_{}'.format(fusnod,
                                        pos_offset + nodes[fusnod]['rpos_max'])
             # anno['node'][fus_n] = fus
-            var_node[fus_n] = fusnod
+            var_node[fus_n] = [fusnod, fusnod]
             fus_reads_f[fus_n] = fus_reads[fusnod]
             for readn in fus_reads[fusnod]:
                 if readn not in read_sum:
@@ -169,4 +172,36 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0):
     var_calls['read_sum'] = read_sum
     var_calls['cand_func_reads'] = cand_func_reads
     var_calls['var_node'] = var_node
-    return (var_calls)
+
+    # print read support summary
+    print("Covered variants and their supporting reads:\n")
+    # order variants by position
+    var_names = sorted(list(var_reads_f) + list(fus_reads_f),
+                       key=lambda k: nodes[var_node[k][0]]['rpos_max'])
+    # prepare TSV output
+    for_tsv = ['\t'.join(['read', 'variant', 'node', 'allele'])]
+    for read in list(read_sum.keys()) + list(cand_func_reads.keys()):
+        to_print = read + '\t'
+        for varid in var_names:
+            for_tsv_r = '\t'.join([read, varid, var_node[varid][1]])
+            if read not in read_sum or varid not in read_sum[read]:
+                # check if the read support a reference node for this variant
+                if varid in var_reads_ref and read in var_reads_ref[varid]:
+                    # if so, print ----
+                    to_print += '-' * len(varid) + '\t'
+                    for_tsv.append(for_tsv_r + '\tref')
+                else:
+                    # if not, print a gap
+                    to_print += ' ' * len(varid) + '\t'
+                    for_tsv.append(for_tsv_r + '\tna')
+            else:
+                # the read goes through the variant, print the variant name
+                to_print += varid + '\t'
+                for_tsv.append(for_tsv_r + '\talt')
+        print(to_print)
+    print()
+
+    # write TSV output
+    print('Writing summary in ' + output_tsv + ' TSV...')
+    with open(output_tsv, 'wt') as outf:
+        outf.write('\n'.join(for_tsv) + '\n')

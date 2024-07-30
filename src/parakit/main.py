@@ -159,48 +159,11 @@ def scmd_call(args):
     # read GAF
     reads = pkio.readGAF(args.r, nodes)
 
-    var_calls = pkvar.findVariants(nodes, vedges, reads,
-                                   nmarkers=args.m,
-                                   pos_offset=pos_offset)
-    var_reads_f = var_calls['var_reads_f']
-    var_reads_ref = var_calls['var_reads_ref']
-    fus_reads_f = var_calls['fus_reads_f']
-    read_sum = var_calls['read_sum']
-    cand_func_reads = var_calls['cand_func_reads']
-    var_node = var_calls['var_node']
-
-    # print read support summary
-    print("Covered variants and their supporting reads:\n")
-    # order variants by position
-    var_names = sorted(list(var_reads_f) + list(fus_reads_f),
-                       key=lambda k: nodes[var_node[k]]['rpos_max'])
-    # prepare TSV output
-    for_tsv = ['\t'.join(['read', 'variant', 'node', 'allele'])]
-    for read in list(read_sum.keys()) + list(cand_func_reads.keys()):
-        to_print = read + '\t'
-        for varid in var_names:
-            for_tsv_r = '\t'.join([read, varid, var_node[varid]])
-            if read not in read_sum or varid not in read_sum[read]:
-                # check if the read support a reference node for this variant
-                if varid in var_reads_ref and read in var_reads_ref[varid]:
-                    # if so, print ----
-                    to_print += '-' * len(varid) + '\t'
-                    for_tsv.append(for_tsv_r + '\tref')
-                else:
-                    # if not, print a gap
-                    to_print += ' ' * len(varid) + '\t'
-                    for_tsv.append(for_tsv_r + '\tna')
-            else:
-                # the read goes through the variant, print the variant name
-                to_print += varid + '\t'
-                for_tsv.append(for_tsv_r + '\talt')
-        print(to_print)
-    print()
-
-    # write TSV output
-    print('Writing summary in ' + args.o + ' TSV...')
-    with open(args.o, 'wt') as outf:
-        outf.write('\n'.join(for_tsv) + '\n')
+    # find variants in reads and write output TSV
+    pkvar.findVariants(nodes, vedges, reads,
+                       nmarkers=args.m,
+                       pos_offset=pos_offset,
+                       output_tsv=args.o)
 
 
 def scmd_paths(args):
