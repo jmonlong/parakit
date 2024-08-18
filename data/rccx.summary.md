@@ -2,6 +2,8 @@ RCCX pangenome summary
 ================
 
   - [PGGB - GRCh38 + all HPRC alleles](#pggb---grch38--all-hprc-alleles)
+  - [Minigraph-Cactus “collapse” - GRCh38 + all HPRC
+    alleles](#minigraph-cactus-collapse---grch38--all-hprc-alleles)
   - [Minigraph-Cactus - GRCh38 + some HPRC
     alleles](#minigraph-cactus---grch38--some-hprc-alleles)
   - [Minigraph-Cactus - GRCh38 only](#minigraph-cactus---grch38-only)
@@ -107,15 +109,18 @@ ggplot(ninfo, aes(x=c2)) +
 
 ![](rccx.summary_files/figure-gfm/unnamed-chunk-6-2.png)<!-- -->
 
-# Minigraph-Cactus - GRCh38 + some HPRC alleles
+# Minigraph-Cactus “collapse” - GRCh38 + all HPRC alleles
 
-Pangenome built with Minigraph-Cactus using GRCh38 and a subset of the
-HPRC v1 phased assemblies. The HPRC haplotypes were selected if the gene
-annotation was concordant between CAT and Ensembl, and were identified
-two modules.
+Pangenome built with an experimental “collapse” feature of
+Minigraph-Cactus which allow for some collapsing based on
+self-alignment. As for the PGGB pangenome above, GRCh38 and all of the
+HPRC v1 phased assemblies were used. No external gene annotation was
+involved to identify the modules. They were predicted based on the
+pangenome traversal and how similar they were from modules 1/2 in
+GRCh38.
 
 ``` r
-ninfo = read.table('rccx.grch38_hprc.mc.node_info.tsv', as.is=TRUE, header=TRUE)
+ninfo = read.table('rccx.grch38_hprc.mcc.node_info.tsv', as.is=TRUE, header=TRUE)
 ```
 
 ``` r
@@ -125,14 +130,14 @@ ninfo %>% group_by(class) %>%
   kable(format.args=list(big.mark=','))
 ```
 
-| class  | node | mean.size.bp | total.bp |
-| :----- | ---: | -----------: | -------: |
-| c1     |  335 |         19.9 |    6,657 |
-| c2     |  220 |          2.5 |      547 |
-| cyc\_l |    1 |         87.0 |       87 |
-| cyc\_r |    1 |         13.0 |       13 |
-| none   |  719 |         36.5 |   26,209 |
-| ref    |    2 |    299,989.5 |  599,979 |
+| class  |  node | mean.size.bp | total.bp |
+| :----- | ----: | -----------: | -------: |
+| c1     |   253 |          1.0 |      264 |
+| c2     |   243 |          1.6 |      378 |
+| cyc\_l |     1 |         90.0 |       90 |
+| cyc\_r |     1 |         44.0 |       44 |
+| none   | 1,622 |         20.7 |   33,548 |
+| ref    | 1,618 |        370.8 |  600,025 |
 
 ``` r
 ninfo %>% group_by(class) %>%
@@ -179,6 +184,78 @@ ggplot(ninfo, aes(x=c2)) +
 
 ![](rccx.summary_files/figure-gfm/unnamed-chunk-10-2.png)<!-- -->
 
+# Minigraph-Cactus - GRCh38 + some HPRC alleles
+
+Pangenome built with Minigraph-Cactus using GRCh38 and a subset of the
+HPRC v1 phased assemblies. The HPRC haplotypes were selected if the gene
+annotation was concordant between CAT and Ensembl, and were identified
+two modules.
+
+``` r
+ninfo = read.table('rccx.grch38_hprc.mc.node_info.tsv', as.is=TRUE, header=TRUE)
+```
+
+``` r
+ninfo %>% group_by(class) %>%
+  summarize(node=n(), mean.size.bp=round(mean(size), 1),
+            total.bp=sum(size)) %>%
+  kable(format.args=list(big.mark=','))
+```
+
+| class  | node | mean.size.bp | total.bp |
+| :----- | ---: | -----------: | -------: |
+| c1     |  335 |         19.9 |    6,657 |
+| c2     |  220 |          2.5 |      547 |
+| cyc\_l |    1 |         87.0 |       87 |
+| cyc\_r |    1 |         13.0 |       13 |
+| none   |  719 |         36.5 |   26,209 |
+| ref    |    2 |    299,989.5 |  599,979 |
+
+``` r
+ninfo %>% group_by(class) %>%
+  summarize(n=n(), total.bp=sum(size)) %>%
+  ggplot(aes(x=n, y=total.bp, color=class)) +
+  geom_point(size=3, alpha=.9) + theme_bw() +
+  scale_color_brewer(palette='Set2') + 
+  scale_y_log10() +
+  xlab('nodes') + ylab('total bases (bp)')
+```
+
+![](rccx.summary_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+
+``` r
+ggplot(ninfo, aes(x=c1, y=c2, color=class)) +
+  geom_point(alpha=.8) +
+  scale_color_brewer(palette='Set1') +
+  xlab('number of module 1 haplotypes') +
+  ylab('number of module 2 haplotypes') +
+  theme_bw()
+```
+
+![](rccx.summary_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+
+``` r
+ggplot(ninfo, aes(x=c1)) +
+  geom_histogram(binwidth=1) +
+  xlab('number of module 1 haplotypes') +
+  ylab('number of nodes') + 
+  scale_x_continuous(breaks=seq(0,100,5)) + 
+  theme_bw()
+```
+
+![](rccx.summary_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
+
+``` r
+ggplot(ninfo, aes(x=c2)) +
+  geom_histogram(binwidth=1) +
+  xlab('number of module 2 haplotypes') +
+  ylab('number of nodes') +
+  scale_x_continuous(breaks=seq(0,100,5)) + 
+  theme_bw()
+```
+
+![](rccx.summary_files/figure-gfm/unnamed-chunk-14-2.png)<!-- -->
+
 # Minigraph-Cactus - GRCh38 only
 
 Pangenome built with Minigraph-Cactus using only GRCh38. The two
@@ -214,7 +291,7 @@ ninfo %>% group_by(class) %>%
   xlab('nodes') + ylab('total bases (bp)')
 ```
 
-![](rccx.summary_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+![](rccx.summary_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
 
 # Comparing the different pangenomes
 
@@ -222,6 +299,8 @@ ninfo %>% group_by(class) %>%
 ninfo = rbind(
   read.table('rccx.grch38_hprc.mc.node_info.tsv', as.is=TRUE, header=TRUE) %>%
   mutate(pg='GRCH38 + some HPRC (MC)'),
+  read.table('rccx.grch38_hprc.mcc.node_info.tsv', as.is=TRUE, header=TRUE) %>%
+  mutate(pg='GRCH38 + all HPRC (MC collapse)'),
   read.table('rccx.grch38.mc.node_info.tsv', as.is=TRUE, header=TRUE) %>%
   mutate(pg='GRCH38 (MC)'),
   read.table('rccx.grch38_hprc.pggb.node_info.tsv', as.is=TRUE, header=TRUE) %>%
@@ -237,7 +316,7 @@ ninfo %>% group_by(pg, class) %>%
   xlab('nodes') + ylab('total bases (bp)')
 ```
 
-![](rccx.summary_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+![](rccx.summary_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
 
 ## Informative nodes
 
@@ -255,7 +334,7 @@ ninfo %>% group_by(pg, class) %>%
   scale_fill_brewer(palette='Set2')
 ```
 
-![](rccx.summary_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
+![](rccx.summary_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
 
 ## Informative nodes in the second half of the module
 
@@ -286,7 +365,7 @@ ninfo %>%
   scale_fill_brewer(palette='Set2')
 ```
 
-![](rccx.summary_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+![](rccx.summary_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
 
 ## Informative nodes within the gene region
 
@@ -313,4 +392,4 @@ ninfo %>%
   scale_fill_brewer(palette='Set2')
 ```
 
-![](rccx.summary_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
+![](rccx.summary_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->

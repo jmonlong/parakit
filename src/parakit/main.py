@@ -100,8 +100,8 @@ def scmd_construct(args):
     config = json.load(open(args.j, 'rt'))
     # check that docker is intalled TODO
     # prepare output file names
-    pg_gfa = pkio.gfaFile(args.o, config, check_file=False)
-    node_tsv = pkio.nodeFile(args.o, config, check_file=False)
+    pg_gfa = pkio.gfaFile(config, prefix=args.o, check_file=False)
+    node_tsv = pkio.nodeFile(config, prefix=args.o, check_file=False)
     opref = pkio.prefixFile(config)
     refname = 'ref'
     if os.path.isfile(pg_gfa):
@@ -111,6 +111,9 @@ def scmd_construct(args):
         if config['method'] == 'mc':
             # use minigraph-cactus
             cons_proc = pkproc.constructPgMc(config, opref, pg_gfa)
+        elif config['method'] == 'mc_collapse':
+            # use minigraph-cactus experiment collapse mode
+            cons_proc = pkproc.constructPgMcCollapse(config, opref, pg_gfa)
         elif config['method'] == 'pggb':
             # use PGGB
             cons_proc = pkproc.constructPgPggb(config, opref, pg_gfa,
@@ -118,7 +121,7 @@ def scmd_construct(args):
         refname = cons_proc['refname']
     # annotate the nodes in the graph
     pkio.readGFA(pg_gfa, refname=refname, out_tsv=node_tsv,
-                 guess_modules=config['method'] == 'pggb')
+                 guess_modules=config['method'] != 'mc')
     # done
     print('Output GFA: ' + pg_gfa)
     print('Node information: ' + node_tsv)
@@ -132,7 +135,7 @@ def scmd_map(args):
     fq_fn = args.o + '.fq'
     pkproc.extractReads(config, args.b, fq_fn, trace=args.t)
     # map reads to pangenome
-    pg_gfa = pkio.gfaFile(args.g, config, check_file=True)
+    pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
     pkproc.mapReads(fq_fn, pg_gfa, args.o)
     print('Output GAF: ' + args.o)
 
@@ -145,11 +148,11 @@ def scmd_call(args):
     pos_offset += 1
 
     # load node info
-    node_fn = pkio.nodeFile(args.n, config, check_file=True)
+    node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
     nodes = pkio.readNodeInfo(node_fn)
 
     # update with edge information
-    pg_gfa = pkio.gfaFile(args.g, config, check_file=True)
+    pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
     pkio.updateNodesSucsWithGFA(nodes, pg_gfa)
 
     # read annotation
@@ -173,11 +176,11 @@ def scmd_paths(args):
         config = json.load(open(args.j, 'rt'))
 
     # load node info
-    node_fn = pkio.nodeFile(args.n, config, check_file=True)
+    node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
     nodes = pkio.readNodeInfo(node_fn)
 
     # update with edge information
-    pg_gfa = pkio.gfaFile(args.g, config, check_file=True)
+    pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
     pkio.updateNodesSucsWithGFA(nodes, pg_gfa)
 
     # read GAF
@@ -225,7 +228,7 @@ def scmd_annotate(args):
     # map fasta sequence(s) to pangenome
     gaf_fn = args.f + '.' + config['method'] + '.gaf.gz'
     # pangenome GFA
-    args.g = pkio.gfaFile(args.g, config, check_file=True)
+    args.g = pkio.gfaFile(config, fn=args.g, check_file=True)
     if args.r != '':
         print('Using {}. No alignment needed.'.format(args.r))
     elif os.path.isfile(gaf_fn):
@@ -240,7 +243,7 @@ def scmd_annotate(args):
     script_path = os.path.join(os.path.dirname(__file__),
                                'parakit.viz.R')
     # update/guess paths before
-    args.n = pkio.nodeFile(args.n, config, check_file=True)
+    args.n = pkio.nodeFile(config, fn=args.n, check_file=True)
     args.e = pkio.geneFile(args.e, config, check_file=True)
     # run the R script to make the graphs
     pkproc.runRscript(script_path, args)
@@ -255,7 +258,7 @@ def scmd_viz(args):
     if args.s != '':
         script_path = args.s
     # update/guess paths before
-    args.n = pkio.nodeFile(args.n, config, check_file=True)
+    args.n = pkio.nodeFile(config, fn=args.n, check_file=True)
     args.e = pkio.geneFile(args.e, config, check_file=True)
     # run the R script to make the graphs
     pkproc.runRscript(script_path, args)

@@ -159,6 +159,7 @@ def prepareRefSeqsForPggb(config):
 
 def prepareHprcSeqsForPggb(config):
     hprc_seqs_for_pggb = []
+    hprc_seqs_for_pggb_names = []
     coord_inf = open(config['hprc_coords'], 'rt')
     for line in coord_inf:
         [samp, coord] = line.rstrip().split('\t')
@@ -177,8 +178,52 @@ def prepareHprcSeqsForPggb(config):
                     out_file.write(line + '\n')
             out_file.close()
         hprc_seqs_for_pggb.append(out_fa)
+        hprc_seqs_for_pggb_names.append(samp)
     coord_inf.close()
-    return (hprc_seqs_for_pggb)
+    return ({'fastas': hprc_seqs_for_pggb,
+             'names': hprc_seqs_for_pggb_names})
+
+
+def constructPgMcCollapse(config, opref, pg_gfa):
+    # prepare mc input info
+    mc_info_fn = opref + '.for_mc.txt'
+    mc_info_f = open(mc_info_fn, 'wt')
+    # prepare reference sequence(s)
+    mc_info_f.write('ref ' + prepareRefSeqsForPggb(config) + '\n')
+    # prepare local sequences from HPRC
+    if 'hprc_agc' in config and 'hprc_coords' in config:
+        hprc_agc = prepareHprcSeqsForPggb(config)
+        for ii in range(len(hprc_agc['fastas'])):
+            mc_info_f.write('{} {}\n'.format(hprc_agc['names'][ii],
+                                             hprc_agc['fastas'][ii]))
+    mc_info_f.close()
+    # prepare script with cactus command
+    mc_sh_fn = opref + '.for_mc.sh'
+    mc_js_fn = opref + '.for_mc.js'
+    mc_outdir_fn = opref + '.pg'
+    mc_sh_f = open(mc_sh_fn, 'wt')
+    mc_sh_f.write('cactus-pangenome ' + mc_js_fn + ' ' + mc_info_fn +
+                  ' --outDir ' + mc_outdir_fn + ' --outName mc_collapse_pg' +
+                  ' --reference ref --collapse all --gfa\n')
+    mc_sh_f.close()
+    # get USER id to make sure the file permission are correct with docker
+    # id_o = subprocess.run(['id', '-u', os.getenv('USER')],
+    #                       check=True, capture_output=True)
+    mc_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
+              '-w', '/app',
+              # '-u', id_o.stdout.decode().rstrip(),
+              'quay.io/glennhickey/cactus:collapse',
+              'sh', mc_sh_fn]
+    subprocess.run(mc_cmd, check=True)
+    # extract GFA to desired output path
+    outf = open(pg_gfa, 'w')
+    cp_cmd = ['gunzip', '-c', mc_outdir_fn + '/mc_collapse_pg.gfa.gz']
+    subprocess.run(cp_cmd, check=True, stdout=outf)
+    outf.close()
+    # remove temporary files
+    for ff in [mc_sh_fn, mc_info_fn]:
+        os.remove(ff)
+    return ({'refname': 'ref'})
 
 
 def constructPgPggb(config, opref, pg_gfa, threads=1):
@@ -187,7 +232,7 @@ def constructPgPggb(config, opref, pg_gfa, threads=1):
     fa_files.append(prepareRefSeqsForPggb(config))
     # prepare local sequences from HPRC
     if 'hprc_agc' in config and 'hprc_coords' in config:
-        fa_files += prepareHprcSeqsForPggb(config)
+        fa_files += prepareHprcSeqsForPggb(config)['fastas']
     # script to run PGGB
     pggb_sh_fn = opref + '.for_pggb.sh'
     pggb_outdir = opref + '.output'

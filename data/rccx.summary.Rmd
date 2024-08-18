@@ -79,6 +79,56 @@ ggplot(ninfo, aes(x=c2)) +
   theme_bw()
 ```
 
+# Minigraph-Cactus "collapse" - GRCh38 + all HPRC alleles
+
+Pangenome built with an experimental "collapse" feature of Minigraph-Cactus which allow for some collapsing based on self-alignment.
+As for the PGGB pangenome above, GRCh38 and all of the HPRC v1 phased assemblies were used.
+No external gene annotation was involved to identify the modules.
+They were predicted based on the pangenome traversal and how similar they were from modules 1/2 in GRCh38.
+
+```{r}
+ninfo = read.table('rccx.grch38_hprc.mcc.node_info.tsv', as.is=TRUE, header=TRUE)
+```
+
+```{r}
+ninfo %>% group_by(class) %>%
+  summarize(node=n(), mean.size.bp=round(mean(size), 1),
+            total.bp=sum(size)) %>%
+  kable(format.args=list(big.mark=','))
+
+ninfo %>% group_by(class) %>%
+  summarize(n=n(), total.bp=sum(size)) %>%
+  ggplot(aes(x=n, y=total.bp, color=class)) +
+  geom_point(size=3, alpha=.9) + theme_bw() +
+  scale_color_brewer(palette='Set2') + 
+  scale_y_log10() +
+  xlab('nodes') + ylab('total bases (bp)')
+```
+
+```{r}
+ggplot(ninfo, aes(x=c1, y=c2, color=class)) +
+  geom_point(alpha=.8) +
+  scale_color_brewer(palette='Set1') +
+  xlab('number of module 1 haplotypes') +
+  ylab('number of module 2 haplotypes') +
+  theme_bw()
+```
+
+```{r}
+ggplot(ninfo, aes(x=c1)) +
+  geom_histogram(binwidth=1) +
+  xlab('number of module 1 haplotypes') +
+  ylab('number of nodes') + 
+  scale_x_continuous(breaks=seq(0,100,5)) + 
+  theme_bw()
+ggplot(ninfo, aes(x=c2)) +
+  geom_histogram(binwidth=1) +
+  xlab('number of module 2 haplotypes') +
+  ylab('number of nodes') +
+  scale_x_continuous(breaks=seq(0,100,5)) + 
+  theme_bw()
+```
+
 # Minigraph-Cactus - GRCh38 + some HPRC alleles
 
 Pangenome built with Minigraph-Cactus using GRCh38 and a subset of the HPRC v1 phased assemblies. 
@@ -159,6 +209,8 @@ ninfo %>% group_by(class) %>%
 ninfo = rbind(
   read.table('rccx.grch38_hprc.mc.node_info.tsv', as.is=TRUE, header=TRUE) %>%
   mutate(pg='GRCH38 + some HPRC (MC)'),
+  read.table('rccx.grch38_hprc.mcc.node_info.tsv', as.is=TRUE, header=TRUE) %>%
+  mutate(pg='GRCH38 + all HPRC (MC collapse)'),
   read.table('rccx.grch38.mc.node_info.tsv', as.is=TRUE, header=TRUE) %>%
   mutate(pg='GRCH38 (MC)'),
   read.table('rccx.grch38_hprc.pggb.node_info.tsv', as.is=TRUE, header=TRUE) %>%

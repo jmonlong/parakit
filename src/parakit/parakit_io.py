@@ -223,18 +223,20 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
 
     # flag nodes contributing to the cycle edge
     # (end of copy 2 to beginning of copy 1)
-    cur_ref_path = []
-    cur_jump = 0
     cur_max_jump = 0
     for ii, nod in enumerate(ref):
-        if nod in cur_ref_path:
-            jump = ii - cur_ref_path.index(nod)
-            if jump > cur_jump:
-                cur_max_jump = ii
-                cur_jump = jump
-        cur_ref_path.append(nod)
-    cyc_end = ref[cur_max_jump]
-    cyc_start = ref[cur_max_jump - 1]
+        jump = ninfo[nod]['rpos_max'] - ninfo[nod]['rpos_min']
+        if jump > cur_max_jump:
+            cur_max_jump = jump
+    # find the first/last nodes with that jump
+    cyc_end = ''
+    for nod in ref:
+        jump = ninfo[nod]['rpos_max'] - ninfo[nod]['rpos_min']
+        if jump > .9 * cur_max_jump and cyc_end == '':
+            # first node with that jump
+            cyc_end = nod
+        if jump > .9 * cur_max_jump:
+            cyc_start = nod
     ninfo[cyc_end]['class'] = 'cyc_l'
     ninfo[cyc_start]['class'] = 'cyc_r'
     print('Guessing that the cycling edge is {}-{}'.format(cyc_start,
@@ -484,9 +486,11 @@ def readVariantAnnotation(filen, nodes, offset):
     return (var_edges_final)
 
 
-def gfaFile(fn, config, check_file=True):
+def gfaFile(config, fn='', prefix='', check_file=True):
     if fn == '':
-        if 'label' in config:
+        if prefix != '':
+            fn = prefix + '.pg.gfa'
+        elif 'label' in config:
             fn = config['label'] + '.pg.gfa'
             if not os.path.isfile(fn) and check_file:
                 fn = 'parakit.{}.pg.gfa'.format(config['method'])
@@ -497,9 +501,11 @@ def gfaFile(fn, config, check_file=True):
     return (fn)
 
 
-def nodeFile(fn, config, check_file=True):
+def nodeFile(config, fn='', prefix='', check_file=True):
     if fn == '':
-        if 'label' in config:
+        if prefix != '':
+            fn = prefix + '.node_info.tsv'
+        elif 'label' in config:
             fn = config['label'] + '.node_info.tsv'
             if not os.path.isfile(fn) and check_file:
                 fn = 'parakit.{}.{}'.format(config['method'], 'node_info.tsv')
