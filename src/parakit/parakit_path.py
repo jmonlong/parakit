@@ -10,18 +10,25 @@ def findPaths(nodes, reads, args):
         for pos, noden in enumerate(path):
             if 'reads' not in nodes[noden]:
                 nodes[noden]['reads'] = []
+            # record which read and at which position it traverses this node
             nodes[noden]['reads'].append([readn, pos])
+            # just in case, also make sure edges followed
+            # by the read are recorded
             if pos < len(path) - 1:
                 nodes[noden]['sucs'][path[pos+1]] = True
     # init path list
     paths = {}
     if args.c == 0:
-        print('Error: -c must be greater than 0')
+        print('Error: minimum read support -c must be greater than 0')
         exit(1)
+    # enumerate path candidates by clustering (sub)reads
     paths_cls = clusterSubreads(nodes, reads, min_read_support=args.c)
     for walk in paths_cls:
         paths[walk] = paths_cls[walk]
 
+    # potentially first select the best paths (in case there are too
+    # many paths and we don't want to consider all pairs)
+    # for now, we keep them all
     best_paths = list(paths.keys())
 
     # evaluate pairs of path
@@ -75,6 +82,10 @@ def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3):
     # process the list
     while len(sreads_list) > 0:
         csreads = sreads_list.pop(0)
+        # to make more candidates and lower the risk of clustering too much,
+        # we also save intermediate clusters
+        # to be used for path enumeration later.
+        sreads_list_final.append(csreads)
         # look at read coverage and find markers
         csreads.computeCoverage()
         csreads.findMarkers(min_read_support=min_read_support)
@@ -84,11 +95,9 @@ def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3):
             csreads.biClusterReads()
             sreads_list.append(csreads.subsetByCluster(0))
             sreads_list.append(csreads.subsetByCluster(1))
-        else:
-            # otherwise, save this cluster as a candidate allele
-            sreads_list_final.append(csreads)
         # iterate until no clear markers suggesting two alleles
     # enumerate alleles
+    # TODO try without doubling the minimum read support here
     res = sreads.enumerateAlleles(sreads_list_final, max_cycles=4,
                                   min_read_support=2*min_read_support)
     return (res)
