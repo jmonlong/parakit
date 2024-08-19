@@ -354,9 +354,13 @@ class Subreads:
                 self.nsucs[nod] = bnod
         # process each read
         for readn in reads.path:
-            # skip if read only maps to one node
-            # (usually the flanking reference)
-            if len(reads.path[readn]) < 2:
+            # skip if read with no informative nodes
+            any_inf_nodes = False
+            for nod in reads.path[readn]:
+                if nodes[nod]['class'] in ['c1', 'c2']:
+                    any_inf_nodes = True
+                    break
+            if not any_inf_nodes:
                 continue
             # init first subread
             sreadc = 0

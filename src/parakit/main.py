@@ -70,12 +70,12 @@ pars_annotate.add_argument('-r', default='', help='input alignments in GAF')
 pars_annotate.add_argument('-t', help='debug trace mode', action='store_true')
 pars_annotate.set_defaults(scmd='annotate')
 
-# paths subcommand: variant pathss by aggregating read support
+# viz subcommand: make different graphs of the results
 pars_viz = spars.add_parser('viz', help='visualize the results')
 pars_viz.add_argument('-v', help='visualization mode: allele_support',
                       default='allele_support')
 pars_viz.add_argument('-j', help='config JSON file', required=True)
-pars_viz.add_argument('-n', help='node information', required=True)
+pars_viz.add_argument('-n', help='node information', default='')
 pars_viz.add_argument('-e', help='input genome element annotation TSV',
                       default='')
 pars_viz.add_argument('-r', default='', help='input alignments in GAF')
@@ -186,40 +186,11 @@ def scmd_paths(args):
     # read GAF
     reads = pkio.readGAF(args.r, nodes)
 
+    # find paths
     paths_res = pkpath.findPaths(nodes, reads, args)
-    escores_r = paths_res['escores']
-    paths = paths_res['paths']
-
-    # write ranked list
-    outf_rk = open(args.o + '.paths-stats.tsv', 'wt')
-    heads_rk = ['hap1', 'hap2', 'cov_cor', 'aln_score',
-                'cov_cor_adj', 'aln_score_adj', 'aln_long_prop']
-    ofmt_rk = '\t'.join(['{}'] * len(heads_rk)) + '\n'
-    outf_rk.write('\t'.join(heads_rk) + '\n')
-    for esc in escores_r:
-        outf_rk.write(ofmt_rk.format(esc['hap1'],
-                                     esc['hap2'],
-                                     esc['cov_cor'],
-                                     esc['aln_score'],
-                                     esc['cov_cor_adj'],
-                                     esc['aln_score_adj'],
-                                     esc['aln_long_prop']))
-
-    # write paths
-    print('Write path information...')
-    outf = open(args.o + '.paths-info.tsv', 'wt')
-    heads = ['hap', 'node', 'ppos', 'class', 'rpos_min', 'rpos_max']
-    ofmt = '\t'.join(['{}'] * len(heads)) + '\n'
-    outf.write('\t'.join(heads) + '\n')
-    for mode in paths:
-        for ppos, nod in enumerate(paths[mode]):
-            outf.write(ofmt.format(mode,
-                                   nod,
-                                   ppos,
-                                   nodes[nod]['class'],
-                                   nodes[nod]['rpos_min'],
-                                   nodes[nod]['rpos_max']))
-    outf.close()
+    pkio.writePathsInfo(paths_res, nodes,
+                        stats_fn=args.o + '.paths-stats.tsv',
+                        info_fn=args.o + '.paths-info.tsv')
 
 
 def scmd_annotate(args):

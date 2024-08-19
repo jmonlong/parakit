@@ -541,3 +541,37 @@ def prefixFile(config):
     if 'label' in config:
         fn = config['label']
     return (fn)
+
+
+def writePathsInfo(paths_res, nodes, stats_fn, info_fn):
+    escores_r = paths_res['escores']
+    paths = paths_res['paths']
+    # write ranked list
+    outf_rk = open(stats_fn, 'wt')
+    heads_rk = ['hap1', 'hap2', 'cov_cor', 'aln_score',
+                'cov_cor_adj', 'aln_score_adj', 'aln_long_prop']
+    ofmt_rk = '\t'.join(['{}'] * len(heads_rk)) + '\n'
+    outf_rk.write('\t'.join(heads_rk) + '\n')
+    for esc in escores_r:
+        outf_rk.write(ofmt_rk.format(esc['hap1'],
+                                     esc['hap2'],
+                                     esc['cov_cor'],
+                                     esc['aln_score'],
+                                     esc['cov_cor_adj'],
+                                     esc['aln_score_adj'],
+                                     esc['aln_long_prop']))
+
+    # write paths
+    outf = open(info_fn, 'wt')
+    heads = ['hap', 'node', 'ppos', 'class', 'rpos_min', 'rpos_max']
+    ofmt = '\t'.join(['{}'] * len(heads)) + '\n'
+    outf.write('\t'.join(heads) + '\n')
+    for mode in paths:
+        for ppos, nod in enumerate(paths[mode]):
+            outf.write(ofmt.format(mode,
+                                   nod,
+                                   ppos,
+                                   nodes[nod]['class'],
+                                   nodes[nod]['rpos_min'],
+                                   nodes[nod]['rpos_max']))
+    outf.close()
