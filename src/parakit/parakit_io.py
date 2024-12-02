@@ -137,9 +137,13 @@ def readGAF(filen, nodes, verbose=True):
         # flip read if mostly traversing in reverse
         if line[5].count('>') < line[5].count('<'):
             path_cov.reverse()
+            path_read_pos.reverse()
             path_node_startpos.reverse()
             path_node_endpos.reverse()
-            path_read_pos.reverse()
+            for ii in range(len(path_node_startpos)):
+                nsize = nodes[path_cov[ii][0]]['size']
+                path_node_startpos[ii] = nsize - path_node_startpos[ii]
+                path_node_endpos[ii] = nsize - path_node_endpos[ii]
         path_cov_node = [pc[0] for pc in path_cov]
         reads_tr.addRead(readn, path_cov_node, cyc_nodes=cyc_nodes,
                          startpos=path_node_startpos,
@@ -152,9 +156,6 @@ def readGAF(filen, nodes, verbose=True):
 def updateNodesSucsWithGFA(nodes, filen, verbose=True):
     if verbose:
         print('Reading ' + filen + '...')
-    # init sucs for all nodes
-    # for nod in nodes:
-    #     nodes[nod]['sucs'] = {}
     # read GFA and update edges
     inf = open(filen, 'rt')
     for line in inf:
@@ -164,6 +165,11 @@ def updateNodesSucsWithGFA(nodes, filen, verbose=True):
                 if 'sucs' not in nodes[line[1]]:
                     nodes[line[1]]['sucs'] = {}
                 nodes[line[1]]['sucs'][line[3]] = True
+    # init sucs for all nodes
+    for nod in nodes:
+        if 'sucs' not in nodes[nod]:
+            print('adding sucs to ', nod)
+            nodes[nod]['sucs'] = {}
     inf.close()
 
 
@@ -198,6 +204,7 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
         if line[0] == 'S':
             ninfo[line[1]] = {'size': len(line[2]),
                               'ref': 0, 'c1': 0, 'c2': 0,
+                              'rnode': -1, 
                               'rpos_min': -1, 'rpos_max': -1,
                               'class': 'none'}
             if len(line[2]) < 10:
@@ -223,6 +230,20 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
 
     # flag nodes contributing to the cycle edge
     # (end of copy 2 to beginning of copy 1)
+    #
+    #        _______________________________________
+    #       |                                       |
+    #  - r1 - c1 - c2 - c3 - c4 - c5 - b1 - b2 - b3 - r2 -
+    #                                |              |
+    #                                ----------------
+    #
+    # Positions on the reference path:
+    #     1    2    3    4    5    6    7    8    9
+    #         10   11   12   13   14                  15
+    # "cycling" edge: cyc_r c5, cyc_l c1
+    # find the size of the largest cycle (followed by the reference path)
+    #   presumably that's the cycle we're interested in, not the smaller
+    #   cycles that might exist
     cur_max_jump = 0
     for ii, nod in enumerate(ref):
         jump = ninfo[nod]['rpos_max'] - ninfo[nod]['rpos_min']
@@ -239,16 +260,18 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
             cyc_start = nod
     ninfo[cyc_end]['class'] = 'cyc_l'
     ninfo[cyc_start]['class'] = 'cyc_r'
-    print('Guessing that the cycling edge is {}-{}'.format(cyc_start,
-                                                           cyc_end))
+    print('Guessing that the cycling happens between {} and '
+          '{}'.format(cyc_start, cyc_end))
 
     # approximate ref position on non-reference paths as
     # the position of nearest ref node
     rpos_min = {}
     rpos_max = {}
+    rnode = {}
     for pname in paths:
         cur_min = 0
         cur_max = 0
+        cur_rnode = 0
         for nod in paths[pname]:
             if ninfo[nod]['rpos_min'] != -1:
                 # if current node has a ref position
@@ -274,7 +297,8 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
                 rpos_max[nod].append(cur_max)
     # use the median of the approximated positions for each node
     for nod in ninfo:
-        if ninfo[nod]['rpos_min'] == ninfo[nod]['rpos_max'] and \
+        if ninfo[nod]['rpos_min'] == -1 and \
+           ninfo[nod]['rpos_max'] == -1 and \
            nod in rpos_min:
             ninfo[nod]['rpos_min'] = int(statistics.median(rpos_min[nod]))
             ninfo[nod]['rpos_max'] = int(statistics.median(rpos_max[nod]))
@@ -548,16 +572,18 @@ def writePathsInfo(paths_res, nodes, stats_fn, info_fn):
     paths = paths_res['paths']
     # write ranked list
     outf_rk = open(stats_fn, 'wt')
-    heads_rk = ['hap1', 'hap2', 'cov_cor', 'aln_score',
-                'cov_cor_adj', 'aln_score_adj', 'aln_long_prop']
+    heads_rk = ['hap1', 'hap2', 'cov_cor', 'cov_dev', 'aln_score',
+                'cov_cor_adj', 'cov_dev_adj', 'aln_score_adj', 'aln_long_prop']
     ofmt_rk = '\t'.join(['{}'] * len(heads_rk)) + '\n'
     outf_rk.write('\t'.join(heads_rk) + '\n')
     for esc in escores_r:
         outf_rk.write(ofmt_rk.format(esc['hap1'],
                                      esc['hap2'],
                                      esc['cov_cor'],
+                                     esc['cov_dev'],
                                      esc['aln_score'],
                                      esc['cov_cor_adj'],
+                                     esc['cov_dev_adj'],
                                      esc['aln_score_adj'],
                                      esc['aln_long_prop']))
 

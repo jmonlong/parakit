@@ -93,6 +93,14 @@ pars_viz.add_argument('-s', help='Optional. R script to run instead of '
 pars_viz.add_argument('-t', help='debug trace mode', action='store_true')
 pars_viz.set_defaults(scmd='viz')
 
+# copy subcommand: estimate the copy number of the modules
+pars_copy = spars.add_parser('copy',
+                             help='estimate the copy number of the modules')
+pars_copy.add_argument('-j', help='config JSON file', required=True)
+pars_copy.add_argument('-n', help='node information', default='')
+pars_copy.add_argument('-r', default='', help='input alignments in GAF')
+pars_copy.set_defaults(scmd='copy')
+
 
 def scmd_construct(args):
     # assumes a 'seqs' directory exists TODO
@@ -236,6 +244,19 @@ def scmd_viz(args):
     return (True)
 
 
+def scmd_copy(args):
+    # read config json file
+    config = json.load(open(args.j, 'rt'))
+    # update/guess paths before
+    # load node info
+    node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
+    nodes = pkio.readNodeInfo(node_fn)
+    # read GAF
+    reads = pkio.readGAF(args.r, nodes)
+    pkvar.estimateCopyNumber(nodes, reads)
+    return (True)
+
+
 def main():
     args = pars.parse_args()
 
@@ -249,5 +270,7 @@ def main():
         scmd_paths(args)
     elif args.scmd == 'viz':
         scmd_viz(args)
+    elif args.scmd == 'copy':
+        scmd_copy(args)
     elif args.scmd == 'annotate':
         scmd_annotate(args)

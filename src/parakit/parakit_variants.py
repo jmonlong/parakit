@@ -205,3 +205,60 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
     print('Writing summary in ' + output_tsv + ' TSV...')
     with open(output_tsv, 'wt') as outf:
         outf.write('\n'.join(for_tsv) + '\n')
+
+
+def estimateCopyNumber(nodes, reads, window_size=20):
+    fl_l = 0
+    fl_r = 0
+    cyc_l = 0
+    cyc_r = 0
+    # get flanking reference nodes
+    fl_nodes = []
+    for noden in nodes:
+        if nodes[noden]['rpos_min'] == nodes[noden]['rpos_max']:
+            fl_nodes.append(noden)
+    # count the reads taking the flank or cycling edges
+    for readn in reads.path:
+        path = reads.path[readn]
+        for pos, noden in enumerate(path):
+            # increment counts for each informative edge
+            if nodes[noden]['class'] == 'cyc_l':
+                # check up to 'window_size' nodes upstream
+                up_pos = max(0, pos - window_size)
+                flank_found = False
+                for fln in fl_nodes:
+                    if fln in path[up_pos:pos]:
+                        flank_found = True
+                        break
+                if flank_found:
+                    # flank -> module start
+                    fl_l += 1
+                else:
+                    # cycle -> module start
+                    cyc_l += 1
+            elif nodes[noden]['class'] == 'cyc_r':
+                # check up to 'window_size' nodes downstream
+                dw_pos = min(len(path), pos + window_size)
+                flank_found = False
+                for fln in fl_nodes:
+                    if fln in path[pos:dw_pos]:
+                        flank_found = True
+                        break
+                if flank_found:
+                    # module end -> flank
+                    fl_r += 1
+                else:
+                    # module end -> cycle
+                    cyc_r += 1
+    print('flank_left\t{}'.format(fl_l))
+    print('flank_right\t{}'.format(fl_r))
+    print('cycle_left\t{}'.format(cyc_l))
+    print('cycle_right\t{}'.format(cyc_r))
+    fl = (fl_l + fl_r) / 2
+    print('flank_mean\t{}'.format(fl))
+    cyc = (cyc_l + cyc_r) / 2
+    print('cycle_mean\t{}'.format(cyc))
+    cn = (fl + cyc) / fl
+    # assume diploid genome
+    cn *= 2
+    print('cn\t{}'.format(round(cn, 4)))

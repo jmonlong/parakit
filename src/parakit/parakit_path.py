@@ -16,15 +16,17 @@ def findPaths(nodes, reads, args):
             # by the read are recorded
             if pos < len(path) - 1:
                 nodes[noden]['sucs'][path[pos+1]] = True
-    # init path list
-    paths = {}
     if args.c == 0:
         print('Error: minimum read support -c must be greater than 0')
         exit(1)
     # enumerate path candidates by clustering (sub)reads
-    paths_cls = clusterSubreads(nodes, reads, min_read_support=args.c)
-    for walk in paths_cls:
-        paths[walk] = paths_cls[walk]
+    paths = clusterSubreads(nodes, reads, min_read_support=args.c)
+    # if too many paths, rerun with more stringent read support
+    while len(paths) > 500:
+        args.c += 1
+        print("Too many paths ({}). Rerunning with min read support: "
+              "{}".format(len(paths), args.c))
+        paths = clusterSubreads(nodes, reads, min_read_support=args.c)
 
     # potentially first select the best paths (in case there are too
     # many paths and we don't want to consider all pairs)
@@ -40,34 +42,69 @@ def findPaths(nodes, reads, args):
         pathn = best_paths[mii]
         aln_score[pathn] = pathReadGraphAlign(paths[pathn],
                                               reads.path, nodes)
+    # precompute weight for each read
+    read_weights = {}
+    longest_reads = sorted(list(reads.path.keys()),
+                           key=lambda k: -len(reads.path[k]))
+    longest_read_l = len(reads.path[longest_reads[0]])
+    for readn in reads.path:
+        # read_w = math.exp(20*len(reads[readn])/longest_read_l)
+        # read_w = 1 - float(longest_reads.index(readn)) / len(longest_reads)
+        read_w = 1
+        read_weights[readn] = read_w
+    # precompute read coverage on each node
+    read_cov = {}
+    for nod in nodes:
+        readc = 0
+        if 'reads' in nodes[nod]:
+            readc = len(nodes[nod]['reads'])
+        read_cov[nod] = readc
+    # precompute path coverage on each node
+    path_cov = {}
+    for pathn in best_paths:
+        path_cov[pathn] = {}
+        for nod in paths[pathn]:
+            if nod not in path_cov[pathn]:
+                path_cov[pathn][nod] = 1
+            else:
+                path_cov[pathn][nod] += 1
     # evaluate each pair
     escores = []
+    # keep track of some min/max values to adjust scores later
     max_cor = 0
+    max_cov_dev = 0
+    min_cov_dev = math.inf
     max_aln = 0
     for mii in range(len(best_paths)):
         for mjj in range(mii, len(best_paths)):
             mode1 = best_paths[mii]
             mode2 = best_paths[mjj]
-            path1 = paths[mode1]
-            path2 = paths[mode2]
-            node_cov = pathNodeCoverage(path1 + path2, nodes)
-            read_aln1 = aln_score[mode1]
-            read_aln2 = aln_score[mode2]
-            esc = evaluatePaths(node_cov, nodes, reads.path,
-                                read_aln1, read_aln2)
+            # node_cov = pathNodeCoverage(path1 + path2, nodes)
+            esc = evaluatePaths(read_cov, path_cov[mode1], path_cov[mode2],
+                                nodes, reads.path,
+                                read_weights, longest_reads,
+                                aln_score[mode1], aln_score[mode2])
             esc['hap1'] = mode1
             esc['hap2'] = mode2
-            max_cor = max(max_cor, esc['cov_cor'])
-            max_aln = max(max_aln, esc['aln_score'])
             escores.append(esc)
-    # adjust scores
+            # update the extreme values used to scale score later
+            max_cor = max(max_cor, esc['cov_cor'])
+            max_cov_dev = max(max_cov_dev, esc['cov_dev'])
+            min_cov_dev = min(min_cov_dev, esc['cov_dev'])
+            max_aln = max(max_aln, esc['aln_score'])
+    # adjust scores to the [0,1] range
+    cov_dev_a = (max_cov_dev - min_cov_dev)
     for esc in escores:
         esc['cov_cor_adj'] = esc['cov_cor'] / max_cor
+        esc['cov_dev_adj'] = (max_cov_dev - esc['cov_dev']) / cov_dev_a
         esc['aln_score_adj'] = esc['aln_score'] / max_aln
     # rank hap pairs
     escores_r = sorted(escores,
-                       key=lambda k: k['cov_cor_adj'] + k['aln_score_adj'],
+                       key=lambda k: k['cov_dev_adj'] + k['aln_score_adj'],
                        reverse=True)
+    # escores_r = sorted(escores,
+    #                    key=lambda k: k['cov_cor_adj'] + k['aln_score_adj'],
+    #                    reverse=True)
 
     return ({'escores': escores_r, 'paths': paths})
 
@@ -99,7 +136,7 @@ def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3):
     # enumerate alleles
     # TODO try without doubling the minimum read support here
     res = sreads.enumerateAlleles(sreads_list_final, max_cycles=4,
-                                  min_read_support=2*min_read_support)
+                                  min_read_support=min_read_support)
     return (res)
 
 
@@ -157,43 +194,64 @@ def pathReadGraphAlign(path, reads, nodes={}, max_node_gap=10):
                 max_score += 1
             else:
                 max_score += 10
-        read_scores[readn] = round(best_score / max_score, 3)
+        if max_score == 0:
+            read_scores[readn] = 0
+        else:
+            read_scores[readn] = round(best_score / max_score, 3)
     return read_scores
 
 
-def pathNodeCoverage(path, nodes):
-    # compute the node coverage in path and reads
-    node_cov = {}
-    for nod in nodes:
-        # if nodes[nod]['class'] != 'none':
-        readc = 0
-        if 'reads' in nodes[nod]:
-            readc = len(nodes[nod]['reads'])
-        node_cov[nod] = {'reads': readc, 'path': 0}
-    for nod in path:
-        # if nodes[nod]['class'] != 'none':
-        node_cov[nod]['path'] += 1
-    return node_cov
+# def pathNodeCoverage(path, nodes):
+#     # compute the node coverage in path and reads
+#     node_cov = {}
+#     for nod in nodes:
+#         # if nodes[nod]['class'] != 'none':
+#         readc = 0
+#         if 'reads' in nodes[nod]:
+#             readc = len(nodes[nod]['reads'])
+#         node_cov[nod] = {'reads': readc, 'path': 0}
+#     for nod in path:
+#         # if nodes[nod]['class'] != 'none':
+#         node_cov[nod]['path'] += 1
+#     return node_cov
 
 
-def evaluatePaths(node_cov, nodes, reads, read_aln, read_aln2=[]):
+def evaluatePaths(read_cov, path_cov_1, path_cov_2,
+                  nodes, reads, read_ws,
+                  longest_reads, read_aln, read_aln2=[]):
     # correlation between coverage on the predicted path and the reads
     read_c = []
     path_c = []
-    for nod in node_cov:
-        if nodes[nod]['size'] < 10 and node_cov[nod]['path'] > 0:
-            read_c.append(node_cov[nod]['reads'])
-            path_c.append(node_cov[nod]['path'])
+    # add nodes in both paths or unique to first path
+    for nod in path_cov_1:
+        if nodes[nod]['size'] < 10:
+            read_c.append(read_cov[nod])
+            if nod in path_cov_2:
+                path_c.append(path_cov_1[nod] + path_cov_2[nod])
+            else:
+                path_c.append(path_cov_1[nod])
+    # add nodes unique to second path
+    for nod in path_cov_2:
+        if nodes[nod]['size'] < 10 and nod not in path_cov_1:
+            read_c.append(read_cov[nod])
+            path_c.append(path_cov_2[nod])
     if stat.variance(read_c) > 0 and stat.variance(path_c) > 0:
         cov_cor = stat.correlation(read_c, path_c)
     elif stat.variance(read_c) == 0 and stat.variance(path_c) == 0:
         cov_cor = 1
     else:
         cov_cor = .5
+    # deviation from copy-number normalized counts
+    one_copy_cov = []
+    for ii in range(len(read_c)):
+        if path_c[ii] > 0:
+            one_copy_cov.append(float(read_c[ii]) / path_c[ii])
+    one_copy_cov = stat.median(one_copy_cov)
+    cov_dev = []
+    for ii in range(len(read_c)):
+        cov_dev.append(abs(read_c[ii] - path_c[ii] * one_copy_cov))
+    cov_dev = stat.mean(cov_dev)
     # read alignment on the path
-    # find longest reads
-    longest_reads = sorted(list(reads.keys()), key=lambda k: -len(reads[k]))
-    longest_read_l = len(reads[longest_reads[0]])
     # compute alignment score
     aln_score = 0
     w_sum = 0
@@ -201,7 +259,7 @@ def evaluatePaths(node_cov, nodes, reads, read_aln, read_aln2=[]):
         r_score = read_aln[readn]
         if len(read_aln2) > 0:
             r_score = max(read_aln2[readn], r_score)
-        read_w = math.exp(20*len(reads[readn])/longest_read_l)
+        read_w = read_ws[readn]
         aln_score += read_w * r_score
         w_sum += read_w
     aln_score = float(aln_score) / w_sum
@@ -217,5 +275,6 @@ def evaluatePaths(node_cov, nodes, reads, read_aln, read_aln2=[]):
             nsupp_reads += 1
         rii += 1
     # return scores
-    return ({'cov_cor': cov_cor, 'aln_score': aln_score,
+    return ({'cov_cor': cov_cor, 'cov_dev': cov_dev,
+             'aln_score': aln_score,
              'aln_long_prop': float(nsupp_reads)/rii_tot})

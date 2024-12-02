@@ -304,7 +304,7 @@ class Reads:
 
 class Subreads:
     def __init__(self):
-        # saves the cycling edge
+        # saves the cycling "edge"
         self.cyc_edge = ['', '']
         # saves default successor nodes
         self.nsucs = {}
@@ -330,28 +330,56 @@ class Subreads:
         self.sparts = {}
 
     def splitReads(self, reads, nodes):
-        # find cycling edge
+        # before looking at reads, look at the nodes and save some information
+        # for example, define "default" edges from each node in nsucs. If we
+        # have no/limited support during the inference but want to continue
+        # traversing a path, we'll use that edge
+        # here, also save the edges to the next reference (used for fast flank
+        # reconstruction)
+        ed = {}
+        ed_rev = {}
         for nod in nodes:
-            # check if cycling
+            # also remember the cycle's boundaries
             if nodes[nod]['class'] == 'cyc_r':
                 self.cyc_edge[0] = nod
             elif nodes[nod]['class'] == 'cyc_l':
                 self.cyc_edge[1] = nod
             # save default successor for each node
             if 'sucs' in nodes[nod]:
+                # to save the "best" node
                 bnod = ''
                 for nnod in nodes[nod]['sucs']:
                     nnod_c12 = bnod_c12 = 0
                     if bnod != '':
                         nnod_c12 = nodes[nnod]['c1'] + nodes[nnod]['c2']
                         bnod_c12 = nodes[bnod]['c1'] + nodes[bnod]['c2']
+                    # keep the nodes with most haplotype/ref support
                     cond = bnod == ''
                     cond = cond or (nodes[nnod]['ref'] > 0 and
                                     nnod_c12 > bnod_c12)
                     cond = cond or (nodes[nnod]['ref'] > nodes[bnod]['ref'])
                     if cond:
                         bnod = nnod
+                    # save edges to reference path for flank approximation
+                    if nodes[nnod]['class'] == 'ref':
+                        ed[nod] = nnod
+                    if nodes[nod]['class'] == 'ref':
+                        ed_rev[nnod] = nod
                 self.nsucs[nod] = bnod
+        # find reference region for left flank by starting at cycling edge
+        flank_l_path = [self.cyc_edge[1]]
+        while flank_l_path[0] in ed_rev:
+            onod = ed_rev[flank_l_path[0]]
+            if onod in flank_l_path:
+                break
+            flank_l_path = [onod] + flank_l_path
+        flank_r_path = [self.cyc_edge[0]]
+        while flank_r_path[-1] in ed:
+            onod = ed[flank_r_path[-1]]
+            if onod in flank_r_path:
+                break
+            flank_r_path.append(ed[flank_r_path[-1]])
+        self.flankn = [flank_l_path, flank_r_path]
         # process each read
         for readn in reads.path:
             # skip if read with no informative nodes
@@ -362,47 +390,76 @@ class Subreads:
                     break
             if not any_inf_nodes:
                 continue
-            # init first subread
+            # split the reads at node involved in the cycle
+            subreads = [[]]
+            for nod in reads.path[readn]:
+                if nod in self.cyc_edge:
+                    subreads.append([])
+                subreads[-1].append(nod)
+            # guess what type of subreads we have
+            rpos_flankl_end = nodes[self.cyc_edge[1]]['rpos_min']
+            rpos_flankr_start = nodes[self.cyc_edge[0]]['rpos_max']
+            subreads_t = []
+            for sri, subread in enumerate(subreads):
+                subread_t = ''
+                for nod in subread:
+                    if nodes[nod]['rpos_min'] < rpos_flankl_end:
+                        # definitely the left flank
+                        subread_t = 'flankl'
+                        break
+                    elif nodes[nod]['rpos_max'] > rpos_flankr_start:
+                        # definitely the right flank
+                        subread_t = 'flankr'
+                        break
+                    elif nod == self.cyc_edge[1]:
+                        # definitely a subread to analyze
+                        subread_t = 'subread'
+                        break
+                    elif nodes[nod]['class'] == 'ref' and \
+                         nodes[nod]['rpos_min'] > rpos_flankl_end and \
+                         nodes[nod]['rpos_max'] < rpos_flankr_start:
+                        # definitely within a buffer region
+                        subread_t = 'buffer'
+                        continue
+                # if we haven't guessed yet, try to use the next subread
+                # to figure out
+                if subread_t == '' and len(subreads) > sri + 1:
+                    # there is a next subread
+                    if subreads[sri+1][0] == self.cyc_edge[0]:
+                        # next subreads exit the region of interest
+                        # hence this is a subread to analyze
+                        subread_t = 'subread'
+                    elif subreads[sri+1][0] == self.cyc_edge[1]:
+                        # next subreads enters the region of interest
+                        # hence this is a buffer region
+                        subread_t = 'buffer'
+                    else:
+                        subread_t = 'unknown'
+                if subread_t == '' and len(subreads) == sri + 1:
+                    # there is no next subread, might be a read completely
+                    # within the region of interest
+                    subread_t = 'subread'
+                subreads_t.append(subread_t)
+            # save the subreads to analyze,
+            # flag them if touching the flanks or cycling
             sreadc = 0
             sreadn = '{}_{}'.format(readn, sreadc)
-            self.path[sreadn] = []
-            for rpos, nod in enumerate(reads.path[readn]):
-                # check if flanking reference
-                if nodes[nod]['class'] == 'ref':
-                    # left or right flank?
-                    if len(self.path[sreadn]) > 0:
-                        self.flankr[sreadn] = True
-                        self.flankn[1] = nod
-                        pnod = self.path[sreadn][-1]
-                        if pnod not in self.ecov:
-                            self.ecov[pnod] = {}
-                        if nod not in self.ecov[pnod]:
-                            self.ecov[pnod][nod] = 0
-                        self.ecov[pnod][nod] += 1
-                    else:
+            for sbi, subread in enumerate(subreads):
+                if subreads_t[sbi] == 'subread':
+                    self.path[sreadn] = subread
+                    # check previous subread
+                    if sbi > 0 and subreads_t[sbi-1] == 'flankl':
                         self.flankl[sreadn] = True
-                        self.flankn[0] = nod
-                        if nod not in self.ecov:
-                            self.ecov[nod] = {}
-                        nnod = reads.path[readn][rpos+1]
-                        if nnod not in self.ecov[nod]:
-                            self.ecov[nod][nnod] = 0
-                        self.ecov[nod][nnod] += 1
-                    # skip
-                    continue
-                # check if cycling back
-                if nod == self.cyc_edge[0] and \
-                   rpos < len(reads.path[readn]) - 1 and \
-                   reads.path[readn][rpos+1] == self.cyc_edge[1]:
-                    # split
-                    self.path[sreadn].append(nod)
-                    self.cyc[sreadn] = True
+                    # check next subreads
+                    nsrs = subreads_t[(sbi+1):]
+                    if len(nsrs) > 0:
+                        if 'subread' in nsrs:
+                            self.cyc[sreadn] = True
+                        elif nsrs[0] == 'flankr':
+                            self.flankr[sreadn] = True
+                    # prepare next subread
                     sreadc += 1
                     sreadn = '{}_{}'.format(readn, sreadc)
-                    self.path[sreadn] = []
-                    # skip
-                    continue
-                self.path[sreadn].append(nod)
 
     def computeCoverage(self):
         for sreadn in self.path:
@@ -486,7 +543,6 @@ class Subreads:
     def subsetByCluster(self, cl):
         sreads_cl = Subreads()
         sreads_cl.cyc_edge = self.cyc_edge
-        sreads_cl.flankn = self.flankn
         for sreadn in self.path:
             if sreadn in self.sparts and self.sparts[sreadn] == cl:
                 sreads_cl.path[sreadn] = self.path[sreadn]
@@ -524,46 +580,6 @@ class Subreads:
             # move to next node
             cnod = best_nnod
             cons_path.append(cnod)
-        return (cons_path)
-
-    def approxFlankPath(self, side='left'):
-        if side == 'left':
-            node_s = self.flankn[0]
-            node_e = self.cyc_edge[1]
-        elif side == 'right':
-            node_s = self.cyc_edge[0]
-            node_e = self.flankn[1]
-        # start from within the collapsed part of the pangenome
-        cnod = node_s
-        cons_path = []
-        if side == 'left':
-            # include the first node only for left flank
-            cons_path.append(cnod)
-        while cnod != node_e:
-            if cnod not in self.ecov or len(self.ecov[cnod]) == 0:
-                if cnod not in self.ecov_prev:
-                    print("Problem: no coverage for " + cnod)
-                # no coverage, look at the coverage from previous round
-                best_nnod = ''
-                best_supp = 0
-                for nnod in self.ecov_prev[cnod]:
-                    if self.ecov_prev[cnod][nnod] > best_supp:
-                        best_nnod = nnod
-                # save most supported edge in current coverage
-                self.ecov[cnod] = {}
-                self.ecov[cnod][best_nnod] = best_supp
-            # check support for each outgoing edge
-            best_nnod = ''
-            best_supp = 0
-            for nnod in self.ecov[cnod]:
-                if self.ecov[cnod][nnod] >= best_supp:
-                    best_nnod = nnod
-            # move to next node
-            cnod = best_nnod
-            cons_path.append(cnod)
-        # don't include the last node for the left flank
-        if side == 'left':
-            cons_path = cons_path[:-1]
         return (cons_path)
 
     def enumerateAlleles(self, cluster_list, max_cycles=3, min_read_support=3):
@@ -641,16 +657,14 @@ class Subreads:
                 if path[0] == 'flankl' and path[-1] == 'flankr':
                     final_paths.append(path)
         # enumerate (node) paths
-        flankl = self.approxFlankPath('left')
-        flankr = self.approxFlankPath('right')
         final_paths_n = {}
         for path in final_paths:
             path_exp = []
             for cl in path:
                 if cl == 'flankl':
-                    path_exp += flankl
+                    path_exp += self.flankn[0]
                 elif cl == 'flankr':
-                    path_exp += flankr
+                    path_exp += self.flankn[0]
                 else:
                     path_exp += cl_paths[cl]
             final_paths_n['_'.join([str(p) for p in path])] = path_exp

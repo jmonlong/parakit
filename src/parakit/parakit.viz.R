@@ -23,6 +23,7 @@ args$out = list(arg='-o', desc='output PDF file', val='parakit.viz.pdf')
 
 ## parse arguments
 args.i = commandArgs(TRUE)
+## args.i = unlist(strsplit('-j rccx.grch38_hprc.mc.config.json -v allele_support -n rccx.grch38_hprc.mc.node_info.tsv -e CYP21A2.gencodev43.nearby_genes.tsv -o parakit.viz.pdf -m 3 -r parakit.viz.pdf.tsv', ' '))
 arg.to.arg = names(args)
 names(arg.to.arg) = as.character(sapply(args, function(l) l$arg))
 ii = 1
@@ -87,6 +88,11 @@ var.vl = NULL
 ## load node info
 ninfo = read.table(args$nodes$val, as.is=TRUE, header=TRUE)
 ninfo = subset(ninfo, ref + c1 + c2 > 0)
+
+## min.fc = 2
+## ninfo = ninfo %>%
+##   mutate(class=ifelse(class=='none' & c2 > min.fc * c1, 'c2', class),
+##          class=ifelse(class=='none' & c1 > min.fc * c2, 'c1', class))
 
 ## offset for this region
 config = fromJSON(file=args$config$val)
@@ -265,7 +271,7 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
               c2.prop.adj=ifelse(c2.prop==0, 1-c1.prop, c2.prop),
               node=node[1], depth=n()) %>%
     filter(!is.na(site), site=='c1c2')
-
+  
   ## ggplot object
   ggp$allele = ggplot(reads.counts, aes(x=node, y=c2.prop.adj)) +
     geom_point(alpha=.7) + theme_bw() +
@@ -276,7 +282,8 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
     xlab('node in collapsed pangenome') +
     facet_grid("allele\nsupport"~.) +
     theme(legend.position='top', strip.text.y=element_text(angle=0))
-
+  ggp$allele
+  
   ##
   ## coverage on non-specific nodes
 
@@ -286,7 +293,7 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
     mutate(seqnames=node) %>%
     group_by(seqnames) %>% summarize(start=min(startpos), end=max(endpos)) %>% 
     select(seqnames, start, end) %>% makeGRangesFromDataFrame
-  t.gr = unlist(tile(n.gr, width=100))
+  t.gr = unlist(tile(n.gr, width=10))
 
   ## in case we want to use reads with a minimum length, I leave this here
   rl.df = reads.df %>% group_by(read) %>% summarize(kbp=sum(endpos-startpos)/1e3)
@@ -305,29 +312,80 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
     select(-strand, -seqnames)
   cov.df$bin = factor(as.character(t.gr), levels=as.character(t.gr))
   cov.df = merge(cov.df, ninfo)
-
+  
   ## assumes diploidy and normalize with coverage on the flanking region
   cov.df = cov.df %>% ungroup %>% mutate(cov.n=2*cov/median(cov[which(class=='ref')]))
-  ## median coverage to show on the graph
-  med.cov = cov.df %>% filter(class!='ref') %>% .$cov.n %>% median
+  ## med.cov = cov.df %>% filter(class!='ref') %>% .$cov.n %>% median
 
+  ## normalize using the edges flanking the module
+  countFlankEdges <- function(read.df, ref.nodes, window.size=20){
+    res_l = sapply(which(read.df$class=='cyc_l'), function(pos){
+      up.pos = max(1, pos - window.size)
+      if(any(ref.nodes %in% read.df$node[up.pos:pos])){
+        return('fl')
+      } else {
+        return('cyc')
+      }
+    })
+    res_r = sapply(which(read.df$class=='cyc_r'), function(pos){
+      dw.pos = min(nrow(read.df), pos + window.size)
+      if(any(ref.nodes %in% read.df$node[pos:dw.pos])){
+        return('fl')
+      } else {
+        return('cyc')
+      }
+    })
+    res = c(unlist(res_l), unlist(res_r))
+    if(length(res) == 0) return(tibble(edge=NA))
+    return(tibble(edge=res))
+  }  
+  ref.nodes = reads.df %>% filter(rpos_min==rpos_max) %>% .$node %>% unique
+  edge.counts = reads.df %>% arrange(read, startpos) %>%
+    group_by(read) %>% do(countFlankEdges(., ref.nodes))
+  fl_c = sum(edge.counts$edge == 'fl', na.rm=TRUE) / 2
+  cyc_c = sum(edge.counts$edge == 'cyc', na.rm=TRUE) / 2
+  fl_cyc_cn = 2 * (fl_c + cyc_c) / fl_c
+  ## message('Estimated copy number: ', fl_cyc_cn)
+  cov.df = cov.df %>% ungroup %>% mutate(cov.n.2=2*cov/fl_c)
+  
   ## summarize the coverage for each node (across all tiles),
   ## keeping only nodes in both modules (or very close)
   cov.s = cov.df %>%
-    filter(c1 > c2 * .9, c2 > c1 * .9, class!='ref') %>% 
-    group_by(node, class) %>% summarize(cov.n=median(cov.n))
-
+    filter(c1 > c2 * .8, c2 > c1 * .8, class!='ref') %>% 
+    group_by(node, class) %>% summarize(cov.n=median(cov.n),
+                                        cov.n.2=median(cov.n.2))
+  ## median coverage to show on the graph
+  med.cov = cov.df %>%
+    filter(c1 > c2 * .8, c2 > c1 * .8, class!='ref') %>% .$cov.n %>% median
+  med.cov.2 = cov.df %>%
+    filter(c1 > c2 * .8, c2 > c1 * .8, class!='ref') %>% .$cov.n.2 %>% median
+  
   ## ggplot object
-  ggp$coverage = ggplot(cov.s, aes(x=node, y=cov.n)) +
+  ## ggp$coverage = ggplot(cov.s, aes(x=node, y=cov.n)) +
+  ##   geom_point(alpha=.7) +
+  ##   theme_bw() +
+  ##   geom_hline(yintercept=4, linetype=2) +
+  ##   geom_hline(yintercept=med.cov, linetype=3) +
+  ##   geom_hline(yintercept=med.cov.2, linetype=4) +
+  ##   geom_hline(yintercept=fl_cyc_cn, linetype=3, color='indianred2') +
+  ##   ylab('estimated\ncopy number') +
+  ##   xlab('node in collapsed pangenome') +
+  ##   facet_grid("coverage\n"~.) +
+  ##   scale_y_continuous(breaks=seq(0,10,2)) + 
+  ##   theme(legend.position='top', strip.text.y=element_text(angle=0))
+
+  ggp$coverage = ggplot(cov.s, aes(x=node, y=cov.n.2)) +
     geom_point(alpha=.7) +
     theme_bw() +
     geom_hline(yintercept=4, linetype=2) +
-    geom_hline(yintercept=med.cov, linetype=3) +
+    geom_hline(yintercept=med.cov.2, linetype=3) +
+    geom_hline(yintercept=fl_cyc_cn, linetype=4) +
     ylab('estimated\ncopy number') +
     xlab('node in collapsed pangenome') +
     facet_grid("coverage\n"~.) +
-    scale_y_continuous(breaks=seq(0,10,2)) + 
+    scale_y_continuous(breaks=c(round(fl_cyc_cn, 2), seq(0,10,2))) + 
     theme(legend.position='top', strip.text.y=element_text(angle=0))
+
 }
 
 ##
@@ -339,9 +397,16 @@ if(args$viz$val %in% c('paths', 'all', 'all_small')){
   stats = read.table(args$hstats$val, as.is=TRUE, header=TRUE)
   ## load information for each predicted haplotype
   haps = read.table(args$hpaths$val, as.is=TRUE, header=TRUE)
+  ## if same haplotype selected twice, duplicate with a different name
+  if(stats$hap1[1] == stats$hap2[1]){
+    new_hapn = paste0(stats$hap1[1], '_d')
+    stats$hap2[1] = new_hapn
+    haps = haps %>% filter(hap==stats$hap1[1]) %>%
+      mutate(hap=new_hapn) %>% rbind(haps)
+  }
   ## keep info for the best pair only
   haps = haps %>% filter(hap %in% c(stats$hap1[1], stats$hap2[1]))
-
+  
   ## prep predicted haplotype paths
   ggp.haps.df = haps %>% mutate(class=factor(class, c('c1', 'none', 'c2'), c('1', 'both', '2')),
                                 ntype=ifelse(class!='both', 'module-specific', 'shared'),

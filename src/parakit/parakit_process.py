@@ -5,7 +5,7 @@ import pyfaidx
 
 
 def writeFasta(outfn, seqn, seq, wrap=80):
-    faf = open("seqs/ref_full.fa", 'wt')
+    faf = open(outfn, 'wt')
     faf.write('>{}\n'.format(seqn))
     seqii = 0
     while seqii < len(seq):
@@ -94,6 +94,7 @@ def constructPgMc(config, opref, pg_gfa):
     mc_js_fn = opref + '.for_mc.js'
     mc_outdir_fn = opref + '.pg'
     mc_sh_f = open(mc_sh_fn, 'wt')
+    mc_sh_f.write('export HOME=/app\n')
     mc_sh_f.write('cactus-pangenome ' + mc_js_fn + ' ' + mc_info_fn +
                   ' --outDir ' + mc_outdir_fn + ' --outName mc_pg' +
                   ' --reference ref_noc2 --gfa\n')
@@ -104,7 +105,7 @@ def constructPgMc(config, opref, pg_gfa):
     mc_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
               '-w', '/app',
               '-u', id_o.stdout.decode().rstrip(),
-              'quay.io/comparative-genomics-toolkit/cactus:v2.6.7',
+              'quay.io/comparative-genomics-toolkit/cactus:v2.9.3',
               'sh', mc_sh_fn]
     if os.path.isfile(mc_outdir_fn + '/mc_pg.gfa.gz') or \
        os.path.isfile(mc_outdir_fn + '/mc_pg.gfa'):
@@ -202,23 +203,43 @@ def constructPgMcCollapse(config, opref, pg_gfa):
     mc_js_fn = opref + '.for_mc.js'
     mc_outdir_fn = opref + '.pg'
     mc_sh_f = open(mc_sh_fn, 'wt')
+    mc_sh_f.write('export HOME=/app\n')
     mc_sh_f.write('cactus-pangenome ' + mc_js_fn + ' ' + mc_info_fn +
                   ' --outDir ' + mc_outdir_fn + ' --outName mc_collapse_pg' +
-                  ' --reference ref --collapse all --gfa\n')
+                  ' --reference ref --collapse --gfa\n')
     mc_sh_f.close()
     # get USER id to make sure the file permission are correct with docker
-    # id_o = subprocess.run(['id', '-u', os.getenv('USER')],
-    #                       check=True, capture_output=True)
+    id_o = subprocess.run(['id', '-u', os.getenv('USER')],
+                          check=True, capture_output=True)
     mc_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
               '-w', '/app',
-              # '-u', id_o.stdout.decode().rstrip(),
-              'quay.io/glennhickey/cactus:collapse',
+              '-u', id_o.stdout.decode().rstrip(),
+              'quay.io/comparative-genomics-toolkit/cactus:v2.9.3',
               'sh', mc_sh_fn]
-    subprocess.run(mc_cmd, check=True)
-    # extract GFA to desired output path
+    if os.path.isfile(mc_outdir_fn + '/mc_collapse_pg.gfa.gz') or \
+       os.path.isfile(mc_outdir_fn + '/mc_collapse_pg.gfa'):
+        print("Skipping Cactus-Minigraph.")
+    else:
+        subprocess.run(mc_cmd, check=True)
+    # reorient some nodes. requires conversion to VG graph and back
+    if not os.path.isfile(mc_outdir_fn + '/mc_collapse_pg.gfa'):
+        # uzip gfa
+        subprocess.run(['gunzip', mc_outdir_fn + '/mc_collapse_pg.gfa.gz'],
+                       check=True)
+    outf = open(mc_outdir_fn + '/mc_collapse_pg.pg', 'w')
+    ## convert to vg format
+    subprocess.run(['vg', 'convert', '-p',
+                    mc_outdir_fn + '/mc_collapse_pg.gfa'],
+                   check=True, stdout=outf)
+    outf.close()
+    outf = open(mc_outdir_fn + '/mc_collapse_pg_reoriented.pg', 'w')
+    subprocess.run(['vg', 'mod', '-O', mc_outdir_fn + '/mc_collapse_pg.pg'],
+                   check=True, stdout=outf)
+    outf.close()
     outf = open(pg_gfa, 'w')
-    cp_cmd = ['gunzip', '-c', mc_outdir_fn + '/mc_collapse_pg.gfa.gz']
-    subprocess.run(cp_cmd, check=True, stdout=outf)
+    subprocess.run(['vg', 'view',
+                    mc_outdir_fn + '/mc_collapse_pg_reoriented.pg'],
+                   check=True, stdout=outf)
     outf.close()
     # remove temporary files
     for ff in [mc_sh_fn, mc_info_fn]:
@@ -382,6 +403,7 @@ def runRscript(script_r, args):
         rscript_cmd += ['-l', args.l]
 
     if args.t:
+        print('Running: ', ' '.join(rscript_cmd))
         subprocess.run(rscript_cmd, check=True)
     else:
         subprocess.run(rscript_cmd, check=True,
