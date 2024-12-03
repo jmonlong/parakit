@@ -153,6 +153,39 @@ def readGAF(filen, nodes, verbose=True):
     return (reads_tr)
 
 
+# 'nodes' is used to know the node size
+def readGFAasReads(filen, nodes, verbose=True):
+    if verbose:
+        print('Reading ' + filen + '...')
+    inf_gfa = open(filen, 'rt')
+    reads_tr = pkc.Reads()
+    for line in inf_gfa:
+        line = line.rstrip().split('\t')
+        if line[0] == 'P':
+            path = line[2].replace('+', '').replace('-', '').split(',')
+            # flip path if mostly traversing in reverse
+            if line[2].count('+') < line[2].count('-'):
+                path.reverse()
+        if line[0] == 'W':
+            path = line[6].replace('<', '>').split('>')[1:]
+            if line[6].count('>') < line[6].count('<'):
+                path.reverse()
+        if line[0] in ['W', 'P']:
+            startpos = []
+            endpos = []
+            readpos = []
+            cur_readpos = 0
+            for node in path:
+                readpos.append(cur_readpos)
+                startpos.append(0)
+                endpos.append(nodes[node]['size'])
+                cur_readpos += nodes[node]['size']
+            reads_tr.addRead(line[1], path, startpos=startpos,
+                             endpos=endpos, readpos=readpos)
+    inf_gfa.close()
+    return (reads_tr)
+
+
 def updateNodesSucsWithGFA(nodes, filen, verbose=True):
     if verbose:
         print('Reading ' + filen + '...')
@@ -204,7 +237,7 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
         if line[0] == 'S':
             ninfo[line[1]] = {'size': len(line[2]),
                               'ref': 0, 'c1': 0, 'c2': 0,
-                              'rnode': -1, 
+                              'rnode': -1,
                               'rpos_min': -1, 'rpos_max': -1,
                               'class': 'none'}
             if len(line[2]) < 10:
@@ -267,18 +300,13 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
     # the position of nearest ref node
     rpos_min = {}
     rpos_max = {}
-    rnode = {}
     for pname in paths:
         cur_min = 0
         cur_max = 0
-        cur_rnode = 0
         for nod in paths[pname]:
             if ninfo[nod]['rpos_min'] != -1:
                 # if current node has a ref position
                 # update current value
-                if nod not in rpos_min:
-                    rpos_min[nod] = []
-                rpos_min[nod].append(cur_min)
                 cur_min = ninfo[nod]['rpos_min'] + ninfo[nod]['size']
             else:
                 # if not save the current value
@@ -287,9 +315,6 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
                 rpos_min[nod].append(cur_min)
             # same for maximum ref position
             if ninfo[nod]['rpos_max'] != -1:
-                if nod not in rpos_max:
-                    rpos_max[nod] = []
-                rpos_max[nod].append(cur_max)
                 cur_max = ninfo[nod]['rpos_max'] + ninfo[nod]['size']
             else:
                 if nod not in rpos_max:
@@ -376,13 +401,35 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
            and ninfo[noden]['c2'] == 0:
             ninfo[noden]['class'] = 'ref'
 
+    # pick a reference node for variant sites
+    rnodes = {}
+    cur_rnode = -1
+    for nod in ref:
+        if ninfo[nod]['class'] in ['ref', 'none']:
+            cur_rnode = nod
+        elif nod not in rnodes:
+            rnodes[nod] = cur_rnode
+    for pname in paths:
+        cur_rnode = -1
+        for nod in paths[pname]:
+            if ninfo[nod]['class'] in ['ref', 'none']:
+                cur_rnode = nod
+            elif nod not in rnodes:
+                rnodes[nod] = cur_rnode
+    for nod in ninfo:
+        if nod in rnodes:
+            ninfo[nod]['rnode'] = rnodes[nod]
+        else:
+            ninfo[nod]['rnode'] = nod
+
     # write node info as TSV
     if out_tsv != '':
         outf = open(out_tsv, 'wt')
-        outf.write('node\tsize\tseq\tref\tc1\tc2\trpos_min\trpos_max\tclass\n')
+        outf.write('node\tsize\tseq\tref\tc1\tc2\trpos_min\trpos_max'
+                   '\trnode\tclass\n')
         for nod in ninfo:
             ni = ninfo[nod]
-            outfmt = '\t'.join(['{}'] * 9) + '\n'
+            outfmt = '\t'.join(['{}'] * 10) + '\n'
             outf.write(outfmt.format(nod,
                                      ni['size'],
                                      ni['seq'],
@@ -391,6 +438,7 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
                                      ni['c2'],
                                      ni['rpos_min'],
                                      ni['rpos_max'],
+                                     ni['rnode'],
                                      ni['class']))
         outf.close()
 

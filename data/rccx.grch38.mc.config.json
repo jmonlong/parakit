@@ -1,7 +1,11 @@
 {
-    "ref_fa": "genomedata/hg38.fa",
-    "c1": "chr6:31980532-32013273",
-    "c2": "chr6:32013273-32046127",
-    "flank_size": 300000,
-    "method": "mc"
+  "ref_fa": "genomedata/hg38.fa",
+  "c1": "chr6:31980532-32013273",
+  "c2": "chr6:32013273-32046127",
+  "flank_size": 300000,
+  "method": "mc",
+  "label": "rccx.grch38.mc",
+  "gene_annot": "CYP21A2.gencodev43.nearby_genes.tsv",
+  "clinvar": "CYP21A2.pathogenic.variant_summary.2024_09_03.tsv",
+  "genes": ["CYP21A2", "CYP21A1P"]
 }

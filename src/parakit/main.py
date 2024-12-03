@@ -62,11 +62,14 @@ pars_annotate = spars.add_parser('annotate',
 pars_annotate.add_argument('-j', help='config JSON file', required=True)
 pars_annotate.add_argument('-n', help='node information', default='')
 pars_annotate.add_argument('-g', help='input GFA pangenome', default='')
-pars_annotate.add_argument('-f', help='input fasta file', required=True)
-pars_annotate.add_argument('-o', help='output PDF file', required=True)
+pars_annotate.add_argument('-f', help='input fasta file', default='')
+pars_annotate.add_argument('-r', help='input alignments in GAF', default='')
+pars_annotate.add_argument('-p', help='annotate the paths in the GFA',
+                           action='store_true')
+pars_annotate.add_argument('-o', help='output PDF file',
+                           default='parakit.viz.pdf')
 pars_annotate.add_argument('-e', help='input genome element annotation TSV',
-                           required=True)
-pars_annotate.add_argument('-r', default='', help='input alignments in GAF')
+                           default='')
 pars_annotate.add_argument('-t', help='debug trace mode', action='store_true')
 pars_annotate.set_defaults(scmd='annotate')
 
@@ -86,8 +89,7 @@ pars_viz.add_argument('-l', help='a label to use as title of the graphs.',
                       default='')
 pars_viz.add_argument('-m', help='maximum number of supporting reads to '
                       'show in graph', default=3)
-pars_viz.add_argument('-o', help='output PDF file',
-                      default='parakit.viz.pdf')
+pars_viz.add_argument('-o', help='output PDF file', default='parakit.viz.pdf')
 pars_viz.add_argument('-s', help='Optional. R script to run instead of '
                       'the one provided.', default='')
 pars_viz.add_argument('-t', help='debug trace mode', action='store_true')
@@ -204,20 +206,26 @@ def scmd_paths(args):
 def scmd_annotate(args):
     # read config json file
     config = json.load(open(args.j, 'rt'))
-    # map fasta sequence(s) to pangenome
+    # if we map fasta sequence(s) to pangenome, use this GAF file
     gaf_fn = args.f + '.' + config['method'] + '.gaf.gz'
     # pangenome GFA
     args.g = pkio.gfaFile(config, fn=args.g, check_file=True)
-    if args.r != '':
+    if args.p:
+        print("Using annotating the pangenome's paths.")
+    elif args.r != '':
         print('Using {}. No alignment needed.'.format(args.r))
-    elif os.path.isfile(gaf_fn):
-        print('{} exists. Skipping alignment to the pangenome'.format(gaf_fn))
-        args.r = gaf_fn
+    elif args.f != '':
+        if os.path.isfile(gaf_fn):
+            print('{} exists. Skipping alignment to the pangenome'.format(gaf_fn))
+            args.r = gaf_fn
+        else:
+            print('Aligning {} to pangenome...'.format(args.f))
+            pkproc.mapReads(args.f, args.g, gaf_fn)
+            print('Output GAF: ' + gaf_fn)
+            args.r = gaf_fn
     else:
-        print('Aligning {} to pangenome...'.format(args.f))
-        pkproc.mapReads(args.f, args.g, gaf_fn)
-        print('Output GAF: ' + gaf_fn)
-        args.r = gaf_fn
+        print('Either -f, -r, or -p must be used.')
+        exit(1)
     # visualize using R script
     script_path = os.path.join(os.path.dirname(__file__),
                                'parakit.viz.R')

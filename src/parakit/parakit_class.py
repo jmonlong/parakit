@@ -190,12 +190,30 @@ class Reads:
 
     def hasRead(self, read_name):
         return (read_name in self.path)
-    
-    def getReadPos(self, snode, enode):
+
+    def getStartPos(self, readn, path_pos):
+        if readn in self.startpos and len(self.startpos[readn]) > 0:
+            return (self.startpos[readn][path_pos])
+        else:
+            return ("NA")
+
+    def getEndPos(self, readn, path_pos):
+        if readn in self.endpos and len(self.endpos[readn]) > 0:
+            return (self.endpos[readn][path_pos])
+        else:
+            return ("NA")
+
+    def getReadPos(self, readn, path_pos):
+        if readn in self.readpos and len(self.readpos[readn]) > 0:
+            return (self.readpos[readn][path_pos])
+        else:
+            return ("NA")
+
+    def getReadPosList(self, snode, enode):
         ename = '{}_{}'.format(snode, enode)
         return (self.edge_to_readpos[ename])
 
-    def getAllReadPos(self, snode):
+    def getAllReadPosList(self, snode):
         rp = ReadPosList()
         if len(self.nsuc[snode]) == 0:
             return (rp)
@@ -237,13 +255,13 @@ class Reads:
     def overlapWithPath(self, path, max_node_gap=10, all_reads=False,
                         in_alns={}, path_pos_s=0):
         # only consider reads overlapping the last node of the path
-        last_edge_rp = self.getReadPos(path[-2], path[-1])
+        last_edge_rp = self.getReadPosList(path[-2], path[-1])
         alns = {}
         if len(in_alns) > 0 and path_pos_s != 0:
             alns = in_alns
         # find reads starting at each possible edge spelled by the current path
         for nii in range(path_pos_s, len(path)-1):
-            rpii = self.getReadPos(path[nii], path[nii+1])
+            rpii = self.getReadPosList(path[nii], path[nii+1])
             # check overlap for each of those reads
             for readn in rpii.read_to_pos:
                 # skip if not read of interest

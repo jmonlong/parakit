@@ -16,6 +16,21 @@ For now, clone the repo and install locally with:
 python3 -m pip install -e .
 ```
 
+It might be a good idea to use a virtual environment:
+
+```sh
+## to create the environment
+python3 -m venv parakit_venv
+## to activate it
+source parakit_venv/bin/activate
+## intall
+pip3 install -e .
+## deactivate env
+deactivate
+```
+
+Then, you can use Parakit anytime you activate this environment.
+
 ### Dependencies
 
 - [vg](https://github.com/vgteam/vg)
@@ -43,7 +58,7 @@ Ready-to-use files for the RCCX pangenome, available in the [`data` folder](data
     - `CYP21A2.pathogenic.variant_summary.20231127.txt` reformatted subset of ClinVar including CYP21A2 pathogenic variants
     - `CYP21A2.gencodev43.nearby_genes.tsv` reformatted subset of GENCODE containing gene annotation in the region.
 
-See [data/rccx.mc.summary.md](data/rccx.mc.summary.md) for some descriptive metrics on this pangenome.
+See [data/rccx.summary.md](data/rccx.summary.md) for some descriptive metrics on this pangenome.
 
 ## Commands
 
@@ -52,7 +67,7 @@ For example, to analyze one sample with an indexed BAM file (aligned to GRCh38).
 To extract relevant reads and map them to the pangenome:
 
 ```bash
-parakit map -j rccx.grch38_hprc.mc.config.json -g rccx.grch38_hprc.mc.pg.gfa -b input.bam -o reads.gaf.gz
+parakit map -j rccx.grch38_hprc.mc.config.json -b input.bam -o reads.gaf.gz
 ```
 
 This creates the `reads.gaf.gz` GAF file.
@@ -60,7 +75,7 @@ This creates the `reads.gaf.gz` GAF file.
 Then, to look for variant-supporting reads:
 
 ```bash
-parakit call -n rccx.grch38_hprc.mc.node_info.tsv -r reads.gaf.gz -a CYP21A2.pathogenic.variant_summary.20231127.txt -j rccx.grch38_hprc.mc.config.json -o calls.tsv
+parakit call -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o calls.tsv
 ```
 
 The reads/calls are saved in `calls.tsv`.
@@ -68,7 +83,7 @@ The reads/calls are saved in `calls.tsv`.
 To list and evaluate candidate diplotype:
 
 ```bash
-parakit paths -n rccx.grch38_hprc.mc.node_info.tsv -r reads.gaf.gz -g rccx.grch38_hprc.mc.pg.gfa -o diplotype
+parakit paths -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o diplotype
 ```
 
 This command creates two files: 
@@ -80,7 +95,7 @@ Finally, the visualization command makes a figure.
 The *all* mode, will make a multi-panel figure summarizing all analysis.
 
 ```bash
-parakit viz -v all -j rccx.grch38_hprc.mc.config.json -n rccx.grch38_hprc.mc.node_info.tsv -r reads.gaf.gz -e CYP21A2.gencodev43.nearby_genes.tsv -c calls.tsv -d diplotype.paths-stats.tsv -p diplotype.paths-info.tsv -o parakit.out.pdf
+parakit viz -v all -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -c calls.tsv -d diplotype.paths-stats.tsv -p diplotype.paths-info.tsv -o parakit.out.pdf
 ```
 
 Other modes include: *calls*, *allele_support*, *paths*.

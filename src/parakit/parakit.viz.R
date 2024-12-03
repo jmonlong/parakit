@@ -262,7 +262,8 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
   ## keeping only sites where both modules are supported
   ## if no support for module 2 but partial support for module 1, use 1-mod1_support
   reads.counts = reads.df %>% arrange(node) %>%
-    group_by(rpos_min) %>% 
+    filter(class %in% c('c1', 'c2')) %>% 
+    group_by(rnode) %>% 
     summarize(site=ifelse(any('c1' %in% class), 'c1', NA),
               site=ifelse(any('c2' %in% class), 'c2', site),
               site=ifelse(all(c('c1', 'c2') %in% class), 'c1c2', site),
@@ -464,6 +465,7 @@ if(args$viz$val == 'annotate'){
     mutate(class=factor(class, c('c1', 'none', 'c2'), c('1', 'both', '2')),
            ntype=ifelse(class!='both', 'module-specific', 'shared')) %>%
     filter(!is.na(class))
+  
   path.v.shift.reads = .2
   ggp$annot = ggplot(ggp.annot.df,
                      aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +

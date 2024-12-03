@@ -366,13 +366,18 @@ def runRscript(script_r, args):
             exit(1)
         rscript_cmd += ['-c', args.c]
     if v_mode in ['all', 'all_small', 'calls', 'allele_support', 'annotate']:
-        if args.r == '':
-            print('This visualization mode requires reads input (-r).')
-            exit(1)
         # load node info
         nodes = pkio.readNodeInfo(args.n)
-        # read GAF
-        reads = pkio.readGAF(args.r, nodes)
+        # read sequences
+        if v_mode == 'annotate' and args.p:
+            # read GFA and make fake reads to visualize
+            reads = pkio.readGFAasReads(args.g, nodes)
+        else:
+            # reads in GAF
+            if args.r == '':
+                print('This visualization mode requires reads input (-r).')
+                exit(1)
+            reads = pkio.readGAF(args.r, nodes)
         # write read info
         reads_fn = out_pdf + '.tsv'
         outf = open(reads_fn, 'wt')
@@ -386,9 +391,9 @@ def runRscript(script_r, args):
                     any_cspec = True
                 nodes_toprint.append(ofmt.format(readn,
                                                  nod,
-                                                 reads.startpos[readn][nii],
-                                                 reads.endpos[readn][nii],
-                                                 reads.readpos[readn][nii]))
+                                                 reads.getStartPos(readn, nii),
+                                                 reads.getEndPos(readn, nii),
+                                                 reads.getReadPos(readn, nii)))
             if any_cspec or v_mode == 'annotate':
                 for tout in nodes_toprint:
                     outf.write(tout)

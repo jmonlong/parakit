@@ -1,0 +1,268 @@
+---
+title: Guessing RCCX modules from a collapsed pangenome
+author: Jean Monlong
+output:
+  beamer_presentation:
+    slide_level: 2
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE, fig.height=5, fig.width=9)
+```
+
+## Pangenome with collapsed RCCX region
+
+- A pangenome was built from the HPRC haplotypes using PGGB. 
+- The global structure of the pangenome looks good
+    - The modules were collapsed nicely
+    - Haplotypes loop back, traversing the collapsed RCCX part of the pangenome multiple times.
+    - The large transposable element polymorphism at the beginning of the RCCX module is visible too.
+    - No other major rearrangement.
+
+## Pangenome with collapsed RCCX region
+
+![](bandage.jpg)
+
+## Question
+
+**Can we guess the location of module 1 (with CY21A1P) and module 2 (with CYP21A2) in the haplotypes based on how they traverse the pangenome?**
+
+
+- Each module 1 should tend to traverse similar nodes across different haplotypes.
+- A PCA-like might analysis might pick up the two types of modules.
+- If we can guess the modules, we won't have to rely on annotation (and filter out haplotypes with suspicious annotations).
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(knitr)
+
+gfa = scan('pg.gfa', '', sep='\n')
+
+gfa = strsplit(gfa, '\t')
+
+## nodes
+nodes.df = lapply(gfa, function(gfav){
+  if(gfav[1] == 'S'){
+    return(tibble(node=gfav[2], size=nchar(gfav[3])))
+  } else {
+    return(tibble())
+  }
+}) %>% bind_rows
+
+## paths
+paths.df = lapply(gfa, function(gfav){
+  if(gfav[1] == 'P'){
+    pp = unlist(strsplit(gfav[3], ','))
+    std = gsub('[0-9]+(.)', '\\1', pp)
+    pp = gsub('(.+).', '\\1', pp)
+    if(mean(std=='-') > .5){
+      std=ifelse(std=='-', '+', '-')
+      pp = rev(pp)
+      std = rev(std)
+    }
+    return(tibble(path=gfav[2], pos=1:length(pp), node=pp, strand=std))
+  } else {
+    return(tibble())
+  }
+}) %>% bind_rows
+```
+
+## Find the looping edge from the reference path
+
+As the edge where the node IDs differ the most
+
+```{r}
+ref.path = paths.df %>% filter(path=='ref') %>%
+  mutate(node=as.numeric(node),
+         next.node=c(node[-1], NA),
+         jump=abs(node-next.node))
+
+cycle = ref.path %>% 
+  filter(jump>300) %>% 
+  head
+kable(cycle)
+```
+
+## Split each haplotype at the looping edges
+
+```{r, cache=TRUE}
+splitPaths <- function(df){
+  ## message(df$path[1])
+  df$module = NA
+  cur.al = 1
+  for(ii in 1:nrow(df)){
+    if(df$node[ii] < cycle$next.node){
+      ## first flanking region
+      df$module[ii] = 'flank'
+    } else if (df$node[ii] > cycle$next.node & df$node[ii] < cycle$node){
+      ## within a module
+      df$module[ii] = cur.al
+    } else {
+      ## new module or right flanking
+      if(df$module[ii-1] != 'flank'){
+        cur.al = cur.al + 1
+      }
+      df$module[ii] = 'flank'
+    }
+  }
+  df
+}
+
+paths.s.all = paths.df %>% mutate(node=as.numeric(node)) %>%
+  group_by(path) %>% do(splitPaths(.))
+```
+
+```{r}
+paths.s.all %>% filter(path=='ref') %>%
+  group_by(module) %>% 
+  sample_n(200) %>% 
+  ggplot(aes(x=pos, y=node, color=module)) +
+  geom_point(alpha=.6) + theme_bw()
+```
+
+## Any small sub-path to remove?
+
+```{r}
+paths.s.all %>% 
+  group_by(path, module) %>%
+  summarize(nodes=n()) %>%
+  ggplot(aes(x=nodes, fill=module)) + geom_histogram() + theme_bw()
+```
+
+No, they seem to have consistent size.
+
+## PCA with all the module nodes
+
+```{r}
+## paths.s = paths.s %>% 
+##   group_by(path, module) %>%
+##   filter(n()>100, n()<1000)
+paths.s = paths.s.all %>% filter(module!='flank')
+
+mat.s.df = paths.s %>% mutate(al=paste0(path, '_', module), value=1) %>%
+  group_by(al) %>% filter(!duplicated(node)) %>% 
+  pivot_wider(id_cols=al, names_from=node, values_from=value, values_fill=0)
+mat.s = mat.s.df %>% ungroup %>% select(-al) %>% as.matrix
+rownames(mat.s) = mat.s.df$al
+## mat.s[1:10,1:10]
+
+pca.o = prcomp(mat.s)
+
+pca.df = tibble(al=rownames(pca.o$x), pc1=pca.o$x[,1], pc2=pca.o$x[,2]) %>%
+  mutate(module=gsub('.+_(.+)', '\\1', al))
+
+ggplot(pca.df, aes(x=pc1, y=pc2, color=module)) +
+  geom_point(alpha=.7) + theme_bw() + 
+  geom_point(data=subset(pca.df, grepl('ref', al)), color='black', size=.5)
+```
+
+*Black points highlights modules in the reference haplotype.*
+
+## Removing the TE polymorphism
+
+```{r}
+te.jump = paths.s %>%
+  mutate(next.node=c(node[-1], NA),
+         jump=abs(node-next.node)) %>% 
+  filter(jump>100, jump<300) %>%
+  group_by(node, next.node) %>% summarize(n=n()) %>%
+  arrange(desc(n)) %>% 
+  head
+
+node.sel = paths.s %>% filter(node < te.jump$node | node > te.jump$next.node)
+
+pca.o = prcomp(mat.s[,as.character(unique(node.sel$node))])
+
+pca.df = tibble(al=rownames(pca.o$x), pc1=pca.o$x[,1], pc2=pca.o$x[,2]) %>%
+  mutate(path=gsub('(.+)_.+', '\\1', al),
+         module=gsub('.+_(.+)', '\\1', al))
+
+ggplot(pca.df, aes(x=pc1, y=pc2, color=module)) +
+  geom_point(alpha=.7) + theme_bw() + 
+  geom_point(data=subset(pca.df, grepl('ref', al)), color='black', size=.5)
+```
+
+*Black points highlights modules in the reference haplotype.*
+
+```{r, eval=FALSE}
+pca.df %>% filter(pc1>0, module==1)
+pca.df %>% filter(module==3)
+```
+
+## Using module-spec nodes in the reference haplotype
+
+
+```{r}
+node.sel = paths.s %>% filter(path=='ref') %>%
+  group_by(node) %>% summarize(nmodule=length(unique(module)), module=paste(module, collapse='_')) %>%
+  filter(nmodule==1)
+
+pca.o = prcomp(mat.s[,as.character(node.sel$node)])
+
+pca.df = tibble(al=rownames(pca.o$x), pc1=pca.o$x[,1], pc2=pca.o$x[,2]) %>%
+  mutate(module=gsub('.+_(.+)', '\\1', al))
+
+ggplot(pca.df, aes(x=pc1, y=pc2, color=module)) +
+  geom_point(alpha=.7) + theme_bw() + 
+  geom_point(data=subset(pca.df, grepl('ref', al)), color='black', size=.5)
+```
+
+*Black points highlights modules in the reference haplotype.*
+
+
+## Random haplotypes colored by PC1
+
+```{r, fig.height=7}
+srand = pca.df %>% mutate(sample=gsub('(.+)_.+', '\\1', al)) %>% .$sample %>%
+  unique %>% sample(7)
+
+paths.s.all %>% filter(path %in% c(srand, 'ref')) %>%
+  mutate(al=paste0(path, '_', module)) %>% 
+  merge(pca.df, all.x=TRUE) %>%
+  group_by(path, module) %>% sample_n(200) %>% 
+  ggplot(aes(x=node, y=pos, shape=module, color=pc1)) +
+  geom_point(alpha=.6) + theme_bw() +
+  facet_grid(path~.) +
+  ylab('position in haplotype') + 
+  scale_color_gradient2() +
+  theme(strip.text.y=element_text(angle=0))
+```
+
+## Tri-modular haplotypes
+
+```{r, fig.height=7}
+s3mod = pca.df %>% filter(module==3) %>% mutate(sample=gsub('(.+)_.+', '\\1', al)) %>% .$sample
+
+paths.s.all %>% filter(path %in% c(s3mod, 'ref')) %>%
+  mutate(al=paste0(path, '_', module)) %>% 
+  merge(pca.df, all.x=TRUE) %>% 
+  group_by(path, module) %>% sample_n(200) %>% 
+  ggplot(aes(x=node, y=pos, shape=module, color=pc1)) +
+  geom_point(alpha=.6) + theme_bw() +
+  facet_grid(path~.) +
+  ylab('position in haplotype') + 
+  scale_color_gradient2() +
+  theme(strip.text.y=element_text(angle=0))
+```
+
+
+## Uni-modular haplotypes
+
+```{r, fig.height=7}
+s1mod = pca.df %>% mutate(sample=gsub('(.+)_.+', '\\1', al)) %>%
+  group_by(sample) %>% filter(length(unique(al)) == 1) %>% .$sample
+
+paths.s.all %>% filter(path %in% c(s1mod, 'ref')) %>%
+  mutate(al=paste0(path, '_', module)) %>% 
+  merge(pca.df, all.x=TRUE) %>% 
+  group_by(path, module) %>% sample_n(200) %>% 
+  ggplot(aes(x=node, y=pos, shape=module, color=pc1)) +
+  geom_point(alpha=.6) + theme_bw() +
+  facet_grid(path~.) +
+  ylab('position in haplotype') + 
+  scale_color_gradient2() +
+  theme(strip.text.y=element_text(angle=0))
+```

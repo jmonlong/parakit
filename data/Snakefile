@@ -1,0 +1,74 @@
+## read index files to match GENOME.[1/2] to each annotation file
+def read_index(filen):
+    inf = open(filen, 'rt')
+    index_files = {}
+    heads = next(inf).rstrip().split('\t')
+    for line in inf:
+        line = line.rstrip().split('\t')
+        if 'reference' in heads and line[heads.index('reference')] != 'chm13':
+            continue
+        if line[heads.index('haplotype')] == '-':
+            continue
+        hap_name = '1' if line[heads.index('haplotype')] == 'paternal' else '2'
+        hap_name = '{}.{}'.format(line[heads.index('sample')],
+                                  hap_name)
+        file_loc = line[heads.index('file_location')].replace('s3://human-pangenomics',
+                                                             'https://s3-us-west-2.amazonaws.com/human-pangenomics')
+        index_files[hap_name] = file_loc
+    inf.close()
+    return index_files
+
+def read_ensembl_index(filen):
+    inf = open(filen, 'rt')
+    index_files = {}
+    heads = next(inf).rstrip().split('\t')
+    for line in inf:
+        line = line.rstrip().split('\t')
+        hap_name = line[heads.index('haplotype')]
+        file_loc = line[heads.index('file_location')]
+        index_files[hap_name] = file_loc
+    inf.close()
+    return index_files
+
+
+ann_files = {}
+ann_files['gene'] = read_index('Year1_assemblies_v2_genbank_CAT_genes.index')
+ann_files['sd'] = read_index('Year1_assemblies_v2_genbank_Seg_Dups.index')
+ann_files['ensembl'] = read_ensembl_index('hprc.ensemble.gff3.paths.tsv')
+
+rule main:
+    input:
+        ensembl=expand("ensembl_cyp/{haplotype}.cyp21a.gff3", haplotype=ann_files['ensembl'].keys()),
+        cat=expand("cat_cyp/{haplotype}.cyp21a.gff3", haplotype=ann_files['gene'].keys()),
+        sd=expand("raw_annotation/{haplotype}.sedef.bedpe", haplotype=ann_files['sd'].keys())
+
+rule extract_cyp_ensembl_annotation:
+    input: 'raw_ensembl_annotation/{haplotype}.gff3.gz'
+    output: "ensembl_cyp/{haplotype}.cyp21a.gff3"
+    shell: "zgrep -e '=CYP21A' -e '=TNXB' -e '=C4B' -e '=C4A' {input} > {output}"
+
+rule extract_cyp_annotation:
+    input: 'raw_annotation/{haplotype}.gff3.gz'
+    output: "cat_cyp/{haplotype}.cyp21a.gff3"
+    shell: "zgrep -e '=CYP21A' -e '=TNXB' -e '=C4B' -e '=C4A' {input} > {output}"
+
+rule dwl_ensembl_annotation:
+    output: temp('raw_ensembl_annotation/{haplotype}.gff3.gz')
+    threads: 1
+    params:
+        url=lambda wildcards: ann_files['ensembl'][wildcards.haplotype]
+    shell: "wget -O {output} {params.url}"
+
+rule dwl_gene_annotation:
+    output: temp('raw_annotation/{haplotype}.gff3.gz')
+    threads: 1
+    params:
+        url=lambda wildcards: ann_files['gene'][wildcards.haplotype]
+    shell: "wget -O {output} {params.url}"
+
+rule dwl_sd_annotation:
+    output: 'raw_annotation/{haplotype}.sedef.bedpe'
+    threads: 1
+    params:
+        url=lambda wildcards: ann_files['sd'][wildcards.haplotype]
+    shell: "wget -O {output} {params.url}"

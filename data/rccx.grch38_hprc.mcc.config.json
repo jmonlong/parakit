@@ -6,7 +6,7 @@
     "method": "mc_collapse",
     "label": "rccx.grch38_hprc.mcc",
     "gene_annot": "CYP21A2.gencodev43.nearby_genes.tsv",
-    "clinvar": "CYP21A2.pathogenic.variant_summary.20231127.txt",
+    "clinvar": "CYP21A2.pathogenic.variant_summary.2024_09_03.tsv",
     "hprc_agc": "genomedata/HPRC-yr1.agc",
     "hprc_coords": "hprc.cyp21a.haps.coords.tsv",
     "genes": ["CYP21A2", "CYP21A1P"]
