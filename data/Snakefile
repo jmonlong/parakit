@@ -34,7 +34,7 @@ def read_ensembl_index(filen):
 ann_files = {}
 ann_files['gene'] = read_index('Year1_assemblies_v2_genbank_CAT_genes.index')
 ann_files['sd'] = read_index('Year1_assemblies_v2_genbank_Seg_Dups.index')
-ann_files['ensembl'] = read_ensembl_index('hprc.ensemble.gff3.paths.tsv')
+ann_files['ensembl'] = read_ensembl_index('hprc.ensembl.gff3.paths.tsv')
 
 rule main:
     input:
