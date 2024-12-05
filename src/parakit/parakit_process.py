@@ -154,6 +154,10 @@ def prepareRefSeqsForPggb(config):
     ref_fa = pyfaidx.Fasta(config['ref_fa'])
     c1, c2, reg_s, reg_e = getRegionsFromConfig(config)
     seq = str(ref_fa[c1[0]][reg_s:reg_e])
+    ## We need to add a check for directory existence, which will probably not exist when running for the first time. 
+    ## `writeFasta` may not have permissions to create the seqs/ directory and then write the file inside it.
+    if not os.path.exists("seqs"):
+        os.makedirs("seqs")
     writeFasta("seqs/ref_full.fa", 'ref', seq.upper())
     return ("seqs/ref_full.fa")
 
