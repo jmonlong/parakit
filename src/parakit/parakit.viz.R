@@ -194,18 +194,22 @@ if('genes' %in% names(config)){
   g.df = subset(g.df, gene_name %in% config$genes)
 }
 
+## project on nodes within the collapsed part of the pangenome, i.e. between cycling nodes
+cyc_nodes = sort(subset(ninfo, class %in% c('cyc_l', 'cyc_r'))$node)
+ninfo.col = ninfo %>% filter(node >= cyc_nodes[1], node <= cyc_nodes[2])
+
 ## make GRange objects for nodes and gene elements
-ninfo.min.gr = GRanges(g.df$chr[1], IRanges(ninfo$rpos_min, width=ninfo$size))
-ninfo.max.gr = GRanges(g.df$chr[1], IRanges(ninfo$rpos_max, width=ninfo$size))
+ninfo.min.gr = GRanges(g.df$chr[1], IRanges(ninfo.col$rpos_min, width=ninfo.col$size))
+ninfo.max.gr = GRanges(g.df$chr[1], IRanges(ninfo.col$rpos_max, width=ninfo.col$size))
 g.gr = g.df %>% mutate(start=start-reg.offset, end=end-reg.offset) %>%
   makeGRangesFromDataFrame(keep.extra.columns=TRUE)
 
 ## match them
 ol = rbind(
   findOverlaps(g.gr, ninfo.min.gr) %>% as.data.frame %>%
-  mutate(node=ninfo$node[subjectHits]),
+  mutate(node=ninfo.col$node[subjectHits]),
   findOverlaps(g.gr, ninfo.max.gr) %>% as.data.frame %>%
-  mutate(node=ninfo$node[subjectHits])) %>% 
+  mutate(node=ninfo.col$node[subjectHits])) %>% 
   group_by(queryHits) %>% summarize(nstart=min(node), nend=max(node))
 
 ## add node start/end information to the gene annotation
@@ -216,7 +220,7 @@ g.df$nend[ol$queryHits] = ol$nend
 
 ## annotate genes as being in module 1 or 2
 c1c2.lim = ninfo %>% filter(class=='cyc_l') %>% .$rpos_max
-g.df = g.df %>% mutate(module=ifelse(start-reg.offset<c1c2.lim, 'c1', 'c2'))
+g.df = g.df %>% mutate(module=ifelse((start+end)/2-reg.offset<c1c2.lim, 'c1', 'c2'))
 
 ## start the ggplot object
 ggp$genes = g.df %>% filter(type %in% c('exon', 'gene')) %>% 
