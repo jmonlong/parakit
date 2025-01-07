@@ -216,7 +216,7 @@ ol = rbind(
 g.df$nstart = NA
 g.df$nstart[ol$queryHits] = ol$nstart
 g.df$nend = NA
-g.df$nend[ol$queryHits] = ol$nend
+g.df$nend[ol$queryHits] = ifelse(ol$nstart==ol$nend, ol$nend + 1, ol$nend)
 
 ## annotate genes as being in module 1 or 2
 c1c2.lim = ninfo %>% filter(class=='cyc_l') %>% .$rpos_max
@@ -251,7 +251,8 @@ ggp$genes = ggp$genes +
   xlab('node ID in the pangenome')
 tss.df = g.df %>% filter(type=='gene') %>% group_by(gene_name, module) %>%
   summarize(node=ifelse(strand=='+', nstart, nend), .groups='drop')
-ggp$genes = ggp$genes + geom_point(aes(x=node, y=0), size=3, data=tss.df, shape=23, alpha=.7)
+ggp$genes = ggp$genes + geom_point(aes(x=node, y=0), size=2, data=tss.df,
+                                   shape=4, alpha=.7)
 
 ## save the x-axis boundaries for later
 xlims_v = c(xlims_v, g.df$nstart, g.df$nend)
@@ -510,8 +511,8 @@ if(args$viz$val == 'annotate'){
   xlims_v = c(xlims_v, ggp.annot.df$node)
 }
 
-## to make sure all panels have the same x-axis limits 
-ggp.xlims = xlim(min(xlims_v), max(xlims_v))
+## to make sure all panels have the same x-axis limits
+ggp.xlims = xlim(min(xlims_v, na.rm=TRUE), max(xlims_v, na.rm=TRUE))
 
 ## add the vertical lines highlighting the variants calls (if present)
 if(!is.null(var.vl) & 'coverage' %in% names(ggp)){
