@@ -135,7 +135,7 @@ def constructPgMc(config, opref, pg_gfa):
                     mc_outdir_fn + '/ref.gaf'], check=True, stdout=outf)
     outf.close()
     outf = open(mc_outdir_fn + '/mc_pg_with_ref.pg', 'w')
-    subprocess.run(['vg', 'mod', '-O',
+    subprocess.run(['vg', 'mod', '-Ou',
                     mc_outdir_fn + '/mc_pg_with_ref_raw.pg'],
                    check=True, stdout=outf)
     outf.close()
