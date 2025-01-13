@@ -79,7 +79,7 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
             for ve in vedges[nod1][nod2]:
                 if not ve['ref']:
                     var_node[ve['cvid']] = [nod1, nod2]
-                min_pos_var.append(nodes[nod2]['rpos_max'])
+                min_pos_var.append(nodes[nod1]['rpos_min'])
     min_pos_var = min(min_pos_var) - 1000
 
     # Looking for deletion/fusion events
@@ -95,7 +95,7 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
     cyc_pos = 0
     for nod in nodes:
         if nodes[nod]['class'] == 'cyc_r':
-            cyc_pos = nodes[nod]['rpos_max']
+            cyc_pos = nodes[nod]['rpos_min']
             break
     # to record fusion-supporting reads by node start
     # fus_reads['nod1'] = ['read1', 'read3']
@@ -115,35 +115,49 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
         if len(marks) < nmarkers * 2:
             continue
         # compute a score to measure how much the flank are c1-c2 specific
-        fus_score_max = 0
-        fus_score_pos = ''
         for ii in range(nmarkers, len(marks) - nmarkers):
             c1_n = marks_c[(ii-nmarkers):ii].count('c1')
             c2_n = marks_c[(ii+1):(ii+nmarkers+1)].count('c2')
             score = min(c2_n / nmarkers, c1_n / nmarkers)
-            if score > fus_score_max:
-                fus_score_max = score
-                fus_score_pos = ii
+            # save any position over the minimum score threshold
+            if score > .8:
+                if marks[ii] not in fus_reads:
+                    fus_reads[marks[ii]] = []
+                fus_reads[marks[ii]].append(readn)
             if c2_n / nmarkers > .5 and c1_n / nmarkers < .5 and \
-               nodes[marks[ii]]['rpos_max'] > min_pos_var:
+               nodes[marks[ii]]['rpos_min'] > min_pos_var:
                 cand_func_reads[readn] = True
-        # if best score is high, save fusion
-        if fus_score_max > .5:
-            if marks[fus_score_pos] not in fus_reads:
-                fus_reads[marks[fus_score_pos]] = []
-            fus_reads[marks[fus_score_pos]].append(readn)
     # filter candidate fusions
+    # keep nodes in range and one per read
+    # (starting with the ones supported by the most reads)
     fus_reads_f = {}
-    for fusnod in fus_reads:
-        if (len(fus_reads[fusnod]) >= 3) and \
-           (nodes[fusnod]['rpos_max'] > min_pos_var) and \
-           (nodes[fusnod]['rpos_max'] < cyc_pos - 100):
-            fus_n = '{}_FUS_{}'.format(fusnod,
-                                       pos_offset + nodes[fusnod]['rpos_max'])
+    # sort nodes with some read support by number of reads
+    fusnodes = sorted(list(fus_reads.keys()), key=lambda nod: -len(fus_reads[nod]))
+    used_reads = {}
+    for fusnod in fusnodes:
+        # skip if node out of range
+        if (nodes[fusnod]['rpos_min'] < min_pos_var) or \
+           (nodes[fusnod]['rpos_min'] > cyc_pos - 100):
+            continue
+        # check that enough unused supporting reads
+        fus_sup_reads = 0
+        for readn in fus_reads[fusnod]:
+            if readn not in used_reads:
+                fus_sup_reads += 1
+        if fus_sup_reads >= 3:
+            # save fusion
+            # fusion name
+            fus_n = '{}_FUS'.format(fusnod)
+            # start positions: around the current node
+            fus_s_l = pos_offset + nodes[fusnod]['rpos_min']
+            fus_e_l = pos_offset + nodes[fusnod]['rpos_max']
             # anno['node'][fus_n] = fus
             var_node[fus_n] = [fusnod, fusnod]
             fus_reads_f[fus_n] = fus_reads[fusnod]
             for readn in fus_reads[fusnod]:
+                # mark reads as "used"
+                used_reads[readn] = True
+                # remember that this read support this fusion
                 if readn not in read_sum:
                     read_sum[readn] = {}
                 read_sum[readn][fus_n] = True
@@ -165,13 +179,13 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
                 if readn not in read_sum:
                     cand_func_reads[readn] = True
 
-    var_calls = {}
-    var_calls['var_reads_f'] = var_reads_f
-    var_calls['var_reads_ref'] = var_reads_ref
-    var_calls['fus_reads_f'] = fus_reads_f
-    var_calls['read_sum'] = read_sum
-    var_calls['cand_func_reads'] = cand_func_reads
-    var_calls['var_node'] = var_node
+    # var_calls = {}
+    # var_calls['var_reads_f'] = var_reads_f
+    # var_calls['var_reads_ref'] = var_reads_ref
+    # var_calls['fus_reads_f'] = fus_reads_f
+    # var_calls['read_sum'] = read_sum
+    # var_calls['cand_func_reads'] = cand_func_reads
+    # var_calls['var_node'] = var_node
 
     # print read support summary
     print("Covered variants and their supporting reads:\n")
@@ -180,7 +194,11 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
                        key=lambda k: nodes[var_node[k][0]]['rpos_max'])
     # prepare TSV output
     for_tsv = ['\t'.join(['read', 'variant', 'node', 'allele'])]
+    printed_reads = {}
     for read in list(read_sum.keys()) + list(cand_func_reads.keys()):
+        # don't write multiple time the same read
+        if read in printed_reads:
+            continue
         to_print = read + '\t'
         for varid in var_names:
             for_tsv_r = '\t'.join([read, varid, var_node[varid][1]])
@@ -199,6 +217,7 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
                 to_print += varid + '\t'
                 for_tsv.append(for_tsv_r + '\talt')
         print(to_print)
+        printed_reads[read] = True
     print()
 
     # write TSV output
