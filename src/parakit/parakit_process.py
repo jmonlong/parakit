@@ -355,7 +355,7 @@ def runRscript(script_r, args):
 
     # run R script
     rscript_cmd = ['Rscript', script_r, '-j', args.j, '-v', v_mode,
-                   '-n', args.n, '-e', args.e, '-o', out_pdf]
+                   '-n', args.n, '-e', args.e, '-s', args.s, '-o', out_pdf]
 
     # add arguments if provided
     if 'm' in args:

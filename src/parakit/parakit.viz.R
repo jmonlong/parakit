@@ -16,6 +16,8 @@ args$genes = list(arg='-e', desc='input genome element annotation TSV')
 args$calls = list(arg='-c', desc='calls TSV')
 args$nreads = list(arg='-m', val=3,
                    desc='maximum number of supporting reads to show in graph')
+args$scale = list(arg='-s', val='pangenome',
+                   desc='pangenome or genome scale')
 args$label = list(arg='-l', desc='a label to use as title of the graphs', val='')
 args$hstats = list(arg='-d', desc='diplotype paths, sorted')
 args$hpaths = list(arg='-p', desc='haplotype paths information')
@@ -23,7 +25,7 @@ args$out = list(arg='-o', desc='output PDF file', val='parakit.viz.pdf')
 
 ## parse arguments
 args.i = commandArgs(TRUE)
-## args.i = unlist(strsplit('-j rccx.grch38_hprc.mc.config.json -v allele_support -n rccx.grch38_hprc.mc.node_info.tsv -e CYP21A2.gencodev43.nearby_genes.tsv -o parakit.viz.pdf -m 3 -r parakit.viz.pdf.tsv', ' '))
+## args.i = unlist(strsplit('-j rccx.grch38_hprc.mc.config.json -v all_small -n rccx.grch38_hprc.mc.node_info.tsv -e CYP21A2.gencodev43.nearby_genes.tsv -o results/rccx.grch38_hprc.mc/DEN63292/DEN63292.all_small.pdf -m 1 -c results/rccx.grch38_hprc.mc/DEN63292/DEN63292.calls.tsv -r results/rccx.grch38_hprc.mc/DEN63292/DEN63292.all_small.pdf.tsv -d results/rccx.grch38_hprc.mc/DEN63292/DEN63292.paths-stats.tsv -p results/rccx.grch38_hprc.mc/DEN63292/DEN63292.paths-info.tsv -l DEN63292', ' '))
 arg.to.arg = names(args)
 names(arg.to.arg) = as.character(sapply(args, function(l) l$arg))
 ii = 1
@@ -78,6 +80,9 @@ splitPaths <- function(df){
   return(df)
 }
 
+## which "scale" to use, either 'pangenome' (default) or 'genome'
+fig.scale = args$scale$val
+
 ## graph list to store the panels of the final graph
 ggp = list()
 ## to save the boundaries of the x-axis
@@ -85,20 +90,34 @@ xlims_v = c()
 ## if variants, will store the corresponding vertical lines to add to other graphs
 var.vl = NULL
 
-## load node info
-ninfo = read.table(args$nodes$val, as.is=TRUE, header=TRUE)
-ninfo = subset(ninfo, ref + c1 + c2 > 0)
-
-## min.fc = 2
-## ninfo = ninfo %>%
-##   mutate(class=ifelse(class=='none' & c2 > min.fc * c1, 'c2', class),
-##          class=ifelse(class=='none' & c1 > min.fc * c2, 'c1', class))
-
 ## offset for this region
 config = fromJSON(file=args$config$val)
 c1_s = as.numeric(gsub('.+:(.+)-.+', '\\1', config$c1))
 c1_e = as.numeric(gsub('.+:.+-(.+)', '\\1', config$c1))
 reg.offset = 1 + c1_s - config$flank_size
+
+## load node info
+ninfo = read.table(args$nodes$val, as.is=TRUE, header=TRUE)
+ninfo = ninfo %>% filter(ref + c1 + c2 > 0) %>% arrange(node)
+
+## assign a position on the second module for each node
+ninfo$pos = NA
+last_pos = 0
+for(ii in 1:nrow(ninfo)){
+  if(ninfo$rpos_min[ii] == ninfo$rpos_max[ii]){
+    ninfo$pos[ii] = last_pos
+  } else {
+    ninfo$pos[ii] = ninfo$rpos_max[ii]
+    last_pos = ninfo$rpos_max[ii]
+  }
+}
+ninfo$pos[which(ninfo$pos==0)] = sort(unique(ninfo$pos))[2]
+ninfo$pos = ninfo$pos + reg.offset
+
+## min.fc = 2
+## ninfo = ninfo %>%
+##   mutate(class=ifelse(class=='none' & c2 > min.fc * c1, 'c2', class),
+##          class=ifelse(class=='none' & c1 > min.fc * c2, 'c1', class))
 
 ## load read information
 reads.df = NULL
@@ -113,6 +132,7 @@ if(args$viz$val %in% c('calls', 'all', 'all_small', 'allele_support', 'annotate'
 ##
 
 if(args$viz$val %in% c('calls', 'all', 'all_small')){
+
   ## load read-variants table
   vars = read.table(args$calls$val, as.is=TRUE, header=TRUE, check.names=F)
   vars = vars %>% mutate(variant=factor(variant, unique(variant)),
@@ -122,8 +142,11 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
   vars.m = vars %>% mutate(allele=as.numeric(allele)) %>% select(-node) %>%
     unique %>% 
     pivot_wider(id_cols=read, names_from=variant, values_from=allele)
-  hc.o = hclust(dist(vars.m[,-1]))
-  read.ord = vars.m$read[hc.o$order]
+  read.ord = vars.m$read
+  if(ncol(vars.m)>2){
+    hc.o = hclust(dist(vars.m[,-1]))
+    read.ord = vars.m$read[hc.o$order]
+  }
   vars$read = factor(vars$read, read.ord)
 
   ## keep relevant information about reads of interest
@@ -136,10 +159,7 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
     select(variant, read) %>% unique %>% 
     merge(rl.df) %>%
     arrange(desc(length)) %>% group_by(variant) %>% do(head(., as.numeric(args$nreads$val))) %>% .$read
-  
-  ## vertical dotted line to help following the variants called
-  var.vl = geom_vline(xintercept=unique(vars$node), linetype=3, linewidth=.3)
-
+    
   ## prepare data.frame for graph
   ## keep reads to show, split, add variant info
   ggp.vars.df = reads.i %>%
@@ -156,18 +176,28 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
     group_by(read) %>%
     filter(!is.na(variant) & path_part == max(path_part))
 
+  ## vertical dotted line to help following the variants called
+  var.vl = geom_vline(xintercept=unique(ggp.vars.pts$node), linetype=3, linewidth=.3)
+  if(fig.scale == 'genome') {
+    var.vl = geom_vline(xintercept=unique(ggp.vars.pts$pos), linetype=3, linewidth=.3)
+  }
+  
   ## how much to shift the nodes from module 1/2 down/up
   ## (between 0 and 0.5 to not overlap with other parts of the graph)
   path.v.shift.reads = .2
   ## prepare ggplot object
-  ggp$reads = ggplot(ggp.vars.df, aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +
-    var.vl + 
+  ggp$reads = ggplot(ggp.vars.df, aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) + xlab('node position in the pangenome')
+  if(fig.scale == 'genome') {
+    ggp$reads = ggplot(ggp.vars.df, aes(x=pos, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) + xlab('position in the chromosome')
+  }
+  
+  ggp$reads = ggp$reads + var.vl + 
     geom_point(aes(shape=variant), data=ggp.vars.pts, size=3) +
     geom_point(aes(color=class, alpha=ntype)) +
     scale_color_brewer(name='module', palette='Set1') +
     scale_alpha_manual(values=c(.7,.05), name='node') +
     scale_y_continuous(breaks=1:10, expand=c(0,.3)) +
-    ylab('read\npart') + xlab('node position in the pangenome') +
+    ylab('read\npart') +
     theme_bw() + 
     facet_grid(read~., scales='free', space='free') + 
     theme(legend.position='top',
@@ -178,84 +208,12 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
            shape=guide_legend(ncol=1))
 
   ## save the x-axis boundaries for later
-  xlims_v = c(xlims_v, ggp.vars.df$node)
+  if(fig.scale == 'genome') {
+    xlims_v = c(xlims_v, ggp.vars.df$pos)
+  } else {
+    xlims_v = c(xlims_v, ggp.vars.df$node)
+  }
 }
-
-
-##
-## Genomic element annotation
-##
-
-## load gene elements annotation
-g.df = read.table(args$genes$val, as.is=TRUE, sep='\t', header=TRUE)
-
-## subset to specific genes if specified in the config
-if('genes' %in% names(config)){
-  g.df = subset(g.df, gene_name %in% config$genes)
-}
-
-## project on nodes within the collapsed part of the pangenome, i.e. between cycling nodes
-cyc_nodes = sort(subset(ninfo, class %in% c('cyc_l', 'cyc_r'))$node)
-ninfo.col = ninfo %>% filter(node >= cyc_nodes[1], node <= cyc_nodes[2])
-
-## make GRange objects for nodes and gene elements
-ninfo.min.gr = GRanges(g.df$chr[1], IRanges(ninfo.col$rpos_min, width=ninfo.col$size))
-ninfo.max.gr = GRanges(g.df$chr[1], IRanges(ninfo.col$rpos_max, width=ninfo.col$size))
-g.gr = g.df %>% mutate(start=start-reg.offset, end=end-reg.offset) %>%
-  makeGRangesFromDataFrame(keep.extra.columns=TRUE)
-
-## match them
-ol = rbind(
-  findOverlaps(g.gr, ninfo.min.gr) %>% as.data.frame %>%
-  mutate(node=ninfo.col$node[subjectHits]),
-  findOverlaps(g.gr, ninfo.max.gr) %>% as.data.frame %>%
-  mutate(node=ninfo.col$node[subjectHits])) %>% 
-  group_by(queryHits) %>% summarize(nstart=min(node), nend=max(node))
-
-## add node start/end information to the gene annotation
-g.df$nstart = NA
-g.df$nstart[ol$queryHits] = ol$nstart
-g.df$nend = NA
-g.df$nend[ol$queryHits] = ifelse(ol$nstart==ol$nend, ol$nend + 1, ol$nend)
-
-## annotate genes as being in module 1 or 2
-c1c2.lim = ninfo %>% filter(class=='cyc_l') %>% .$rpos_max
-g.df = g.df %>% mutate(module=ifelse((start+end)/2-reg.offset<c1c2.lim, 'c1', 'c2'))
-
-## start the ggplot object
-ggp$genes = g.df %>% filter(type %in% c('exon', 'gene')) %>% 
-  ggplot(aes(color=module))
-
-## if variants are also shown, add the vertical lines to help follow their positions
-if(!is.null(var.vl)){
-  ggp$genes = ggp$genes + var.vl
-}
-
-## palette with just 1st/3rd values (module 1/2 in the full palette)
-pal.set1 = brewer.pal(6, 'Set1')[c(1,3)]
-
-## add the rest of the ggplot elements
-ggp$genes = ggp$genes + 
-  geom_segment(aes(x=nstart, xend=nend, y=0, yend=0, linewidth=type)) + 
-  facet_grid(gene_name~.) +
-  scale_linewidth_manual(values=c(3, 1)) +
-  scale_y_continuous(breaks=0:1) +
-  scale_color_manual(values=pal.set1) + 
-  theme_bw() +
-  guides(color='none') +
-  labs(linewidth=NULL) +
-  ylab('gene\nannotation') + 
-  theme(strip.text.y=element_text(angle=0),
-        axis.text.y=element_blank(), 
-        legend.position=c(.01,.01), legend.justification=c(0,0)) +
-  xlab('node ID in the pangenome')
-tss.df = g.df %>% filter(type=='gene') %>% group_by(gene_name, module) %>%
-  summarize(node=ifelse(strand=='+', nstart, nend), .groups='drop')
-ggp$genes = ggp$genes + geom_point(aes(x=node, y=0), size=2, data=tss.df,
-                                   shape=4, alpha=.7)
-
-## save the x-axis boundaries for later
-xlims_v = c(xlims_v, g.df$nstart, g.df$nend)
 
 ##
 ## allelic balance
@@ -275,20 +233,35 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
               c2.prop=mean(class=='c2'),
               c1.prop=mean(class=='c1'),
               c2.prop.adj=ifelse(c2.prop==0, 1-c1.prop, c2.prop),
-              node=node[1], depth=n()) %>%
+              pos=pos[1], node=node[1], depth=n()) %>%
     filter(!is.na(site), site=='c1c2')
-  
+
   ## ggplot object
-  ggp$allele = ggplot(reads.counts, aes(x=node, y=c2.prop.adj)) +
+  if(fig.scale == 'pangenome'){
+    ggp$allele = ggplot(reads.counts, aes(x=node, y=c2.prop.adj)) +
+    xlab('node in collapsed pangenome')
+  } else {
+    ggp$allele = ggplot(reads.counts, aes(x=pos, y=c2.prop.adj)) +
+    xlab('position in chromosome')
+  }
+  
+  ggp$allele = ggp$allele +
+    geom_hline(yintercept=c(.25, .5, .75), color='#720e21', linetype=1, alpha=.5) +
+    geom_hline(yintercept=c(1/3, 2/3), color='#03195b', linetype=1, alpha=.5) +
+    scale_y_continuous(breaks=seq(0, 1, .25),
+                       minor_breaks=c(),
+                       limits=c(0,1)) + 
     geom_point(alpha=.7) + theme_bw() +
-    geom_hline(yintercept=.5, linetype=2) +
-    geom_hline(yintercept=c(1/3,2/3), linetype=3) +
-    ylim(0,1) +
     ylab('module 2\nallelic ratio') +
-    xlab('node in collapsed pangenome') +
     facet_grid("allele\nsupport"~.) +
     theme(legend.position='top', strip.text.y=element_text(angle=0))
-  ggp$allele
+  
+  ## save the x-axis boundaries for later
+  if(fig.scale == 'genome') {
+    xlims_v = c(xlims_v, reads.counts$pos)
+  } else {
+    xlims_v = c(xlims_v, reads.counts$node)
+  }
   
   ##
   ## coverage on non-specific nodes
@@ -358,7 +331,7 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
   ## keeping only nodes in both modules (or very close)
   cov.s = cov.df %>%
     filter(c1 > c2 * .8, c2 > c1 * .8, class!='ref') %>% 
-    group_by(node, class) %>% summarize(cov.n=median(cov.n),
+    group_by(pos, node, class) %>% summarize(cov.n=median(cov.n),
                                         cov.n.2=median(cov.n.2))
   ## median coverage to show on the graph
   med.cov = cov.df %>%
@@ -380,17 +353,31 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
   ##   scale_y_continuous(breaks=seq(0,10,2)) + 
   ##   theme(legend.position='top', strip.text.y=element_text(angle=0))
 
-  ggp$coverage = ggplot(cov.s, aes(x=node, y=cov.n.2)) +
+  if(fig.scale == 'pangenome'){
+    ggp$coverage = ggplot(cov.s, aes(x=node, y=cov.n.2)) + 
+      xlab('node in collapsed pangenome')
+  } else {
+    ggp$coverage = ggplot(cov.s, aes(x=pos, y=cov.n.2)) + 
+      xlab('position in chromosome')
+  }
+
+  ggp$coverage = ggp$coverage +
     geom_point(alpha=.7) +
     theme_bw() +
     geom_hline(yintercept=4, linetype=2) +
     geom_hline(yintercept=med.cov.2, linetype=3) +
     geom_hline(yintercept=fl_cyc_cn, linetype=4) +
     ylab('estimated\ncopy number') +
-    xlab('node in collapsed pangenome') +
     facet_grid("coverage\n"~.) +
     scale_y_continuous(breaks=c(round(fl_cyc_cn, 2), seq(0,10,2))) + 
     theme(legend.position='top', strip.text.y=element_text(angle=0))
+
+  ## save the x-axis boundaries for later
+  if(fig.scale == 'genome') {
+    xlims_v = c(xlims_v, cov.s$pos)
+  } else {
+    xlims_v = c(xlims_v, cov.s$node)
+  }
 
 }
 
@@ -418,12 +405,25 @@ if(args$viz$val %in% c('paths', 'all', 'all_small')){
                                 ntype=ifelse(class!='both', 'module-specific', 'shared'),
                                 hap=factor(hap, levels=unique(hap), labels=c('hap_1', 'hap_2'))) %>% 
     filter(!is.na(class)) %>% arrange(class=='1', class=='2')
-
+  ## add position for each node
+  ggp.haps.df = ninfo %>% select(node, pos) %>% merge(ggp.haps.df)
+  
   ## how much to vertically shift the points of different classes (for aesthetic purpose)
   path.v.shift.haps = 20
+  if(fig.scale == 'pangenome'){
+    ggp$haps = ggplot(ggp.haps.df, aes(x=node,
+                                       y=ppos + path.v.shift.haps*(as.numeric(class) - 1),
+                                       color=class, alpha=ntype)) +
+      xlab('node in collapsed pangenome')
+  } else {
+    ggp$haps = ggplot(ggp.haps.df, aes(x=pos,
+                                       y=ppos + path.v.shift.haps*(as.numeric(class) - 1),
+                                       color=class, alpha=ntype)) +
+      xlab('position in chromosome')
+  }
+
   ## "dot plot" visualization: x=pangenome position, y=haplotype position
-  ggp$haps = ggplot(ggp.haps.df, aes(x=node, y=ppos + path.v.shift.haps*(as.numeric(class) - 1),
-                                     color=class, alpha=ntype)) +
+  ggp$haps = ggp$haps +
     geom_point() +
     scale_color_brewer(name='module', palette='Set1') +
     scale_alpha_manual(values=c(.8,.05), name='node') + 
@@ -440,14 +440,26 @@ if(args$viz$val %in% c('paths', 'all', 'all_small')){
     ungroup %>% 
     mutate(class=factor(class, c('c1', 'none', 'c2'), c('1', 'both', '2')),
            ntype=ifelse(class!='both', 'module-specific', 'shared'),
-           hap=factor(hap, levels=unique(hap), labels=c('hap_1', 'hap_2')))
+           hap=factor(hap, levels=unique(hap), labels=c('hap_1', 'hap_2'))) %>%
+    filter(!is.na(ntype))
   path.v.shift.reads = .2
-  ggp$haps.s = ggplot(ggp.haps.s.df, aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +
+
+  if(fig.scale == 'pangenome'){
+    ggp$haps.s = ggplot(ggp.haps.s.df, aes(x=node,
+                                           y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +
+      xlab('node in collapsed pangenome')
+  } else {
+    ggp$haps.s = ggplot(ggp.haps.s.df, aes(x=pos,
+                                           y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +
+      xlab('position in chromosome')
+  }
+
+  ggp$haps.s = ggp$haps.s +
     geom_point(aes(color=class, alpha=ntype)) +
     scale_color_brewer(name='module', palette='Set1') +
     scale_alpha_manual(values=c(.7,.05), name='node') +
     scale_y_continuous(breaks=1:10, expand=c(0,.3)) +
-    ylab('path\npart') + xlab('node position in the pangenome') +
+    ylab('path\npart') + 
     theme_bw() + 
     facet_grid(hap~., scales='free', space='free') + 
     theme(legend.position='top',
@@ -456,6 +468,14 @@ if(args$viz$val %in% c('paths', 'all', 'all_small')){
     guides(alpha=guide_legend(ncol=1),
            color=guide_legend(ncol=2),
            shape=guide_legend(ncol=1))
+
+  ## save the x-axis boundaries for later
+  if(fig.scale == 'genome') {
+    xlims_v = c(xlims_v, ggp.haps.s.df$pos)
+  } else {
+    xlims_v = c(xlims_v, ggp.haps.s.df$node)
+  }
+
 }
 
 ##
@@ -512,7 +532,130 @@ if(args$viz$val == 'annotate'){
 }
 
 ## to make sure all panels have the same x-axis limits
-ggp.xlims = xlim(min(xlims_v, na.rm=TRUE), max(xlims_v, na.rm=TRUE))
+xlims = c(min(xlims_v, na.rm=TRUE), max(xlims_v, na.rm=TRUE))
+
+if(fig.scale == 'genome'){
+  xlims[2] = xlims[2] + 1000
+}
+
+## message('x-axis limits', xlims)
+ggp.xlims = xlim(xlims[1], xlims[2])
+
+##
+## Genomic element annotation
+##
+
+## load gene elements annotation
+g.df = read.table(args$genes$val, as.is=TRUE, sep='\t', header=TRUE)
+
+## subset to specific genes if specified in the config
+if('genes' %in% names(config)){
+  g.df = subset(g.df, gene_name %in% config$genes)
+}
+
+## project on nodes within the collapsed part of the pangenome, i.e. between cycling nodes
+cyc_nodes = sort(subset(ninfo, class %in% c('cyc_l', 'cyc_r'))$node)
+ninfo.col = ninfo %>% filter(node >= cyc_nodes[1], node <= cyc_nodes[2])
+
+## make GRange objects for nodes and gene elements
+ninfo.min.gr = GRanges(g.df$chr[1], IRanges(ninfo.col$rpos_min, width=ninfo.col$size))
+ninfo.max.gr = GRanges(g.df$chr[1], IRanges(ninfo.col$rpos_max, width=ninfo.col$size))
+g.gr = g.df %>% mutate(start=start-reg.offset, end=end-reg.offset) %>%
+  makeGRangesFromDataFrame(keep.extra.columns=TRUE)
+
+## match them
+ol = rbind(
+  findOverlaps(g.gr, ninfo.min.gr) %>% as.data.frame %>%
+  mutate(node=ninfo.col$node[subjectHits]),
+  findOverlaps(g.gr, ninfo.max.gr) %>% as.data.frame %>%
+  mutate(node=ninfo.col$node[subjectHits])) %>% 
+  group_by(queryHits) %>% summarize(nstart=min(node), nend=max(node))
+
+## add node start/end information to the gene annotation
+g.df$nstart = NA
+g.df$nstart[ol$queryHits] = ol$nstart
+g.df$nend = NA
+g.df$nend[ol$queryHits] = ifelse(ol$nstart==ol$nend, ol$nend + 1, ol$nend)
+
+## annotate genes as being in module 1 or 2
+c1c2.lim = ninfo %>% filter(class=='cyc_l') %>% .$rpos_max
+g.df = g.df %>% mutate(module=ifelse((start+end)/2-reg.offset<c1c2.lim, 'c1', 'c2'))
+
+## if we're plotting in "genome" scale, we need to shift the genes in module 1, annoying...
+## let's begin by shifting by the median shift across the region
+shift.bp = ninfo %>% filter(rpos_min != rpos_max) %>% mutate(shift=rpos_max-rpos_min) %>% .$shift %>% median
+shift.lim = min(ninfo$pos)
+g.df = g.df %>% mutate(shift=(start+end)/2 < shift.lim,
+                       pstart=ifelse(shift, start + shift.bp, start),
+                       pend=ifelse(shift, end + shift.bp, end))
+
+## prepare TSS info
+tss.df = g.df %>% filter(type=='gene') %>% group_by(gene_name, module) %>%
+  summarize(node=ifelse(strand=='+', nstart, nend),
+            pos=ifelse(strand=='+', pstart, pend), .groups='drop')
+
+## adjust to the current (pan)genomic range defined in xlims
+if(fig.scale == 'pangenome'){
+  g.df = g.df %>% mutate(nstart=ifelse(nstart>xlims[2], xlims[2], nstart),
+                         nstart=ifelse(nstart<xlims[1], xlims[1], nstart),
+                         nend=ifelse(nend>xlims[2], xlims[2], nend),
+                         nend=ifelse(nend<xlims[1], xlims[1], nend)) %>%
+    filter(nstart!=nend)
+  tss.df = tss.df %>% filter(node<xlims[2], node>xlims[1])
+} else {
+  g.df = g.df %>% mutate(pstart=ifelse(pstart>xlims[2], xlims[2], pstart),
+                         pstart=ifelse(pstart<xlims[1], xlims[1], pstart),
+                         pend=ifelse(pend>xlims[2], xlims[2], pend),
+                         pend=ifelse(pend<xlims[1], xlims[1], pend)) %>%
+    filter(pstart!=pend)
+  tss.df = tss.df %>% filter(pos<xlims[2], pos>xlims[1])
+}
+
+## start the ggplot object
+ggp$genes = g.df %>% filter(type %in% c('exon', 'gene')) %>% 
+  ggplot(aes(color=module))
+
+## if variants are also shown, add the vertical lines to help follow their positions
+if(!is.null(var.vl)){
+  ggp$genes = ggp$genes + var.vl
+}
+
+## palette with just 1st/3rd values (module 1/2 in the full palette)
+pal.set1 = brewer.pal(6, 'Set1')[c(1,3)]
+
+## define the columns to use
+if(fig.scale == 'pangenome'){
+  ggp$genes = ggp$genes + 
+    geom_segment(aes(x=nstart, xend=nend, y=0, yend=0, linewidth=type)) +
+    xlab('node ID in the pangenome')
+} else {
+  ggp$genes = ggp$genes + 
+    geom_segment(aes(x=pstart, xend=pend, y=0, yend=0, linewidth=type)) +
+    xlab('position in the chromosome')
+}
+
+## add the rest of the ggplot elements
+ggp$genes = ggp$genes + 
+  facet_grid(gene_name~.) +
+  scale_linewidth_manual(values=c(3, 1)) +
+  scale_y_continuous(breaks=0:1) +
+  scale_color_manual(values=pal.set1) + 
+  theme_bw() +
+  guides(color='none') +
+  labs(linewidth=NULL) +
+  ylab('gene\nannotation') + 
+  theme(strip.text.y=element_text(angle=0),
+        axis.text.y=element_blank(), 
+        legend.position=c(.01,.01), legend.justification=c(0,0))
+
+## add TSS symbol
+if(fig.scale == 'pangenome'){
+  ggp$genes = ggp$genes + geom_point(aes(x=node, y=0), size=2, data=tss.df,
+                                     shape=4, alpha=.7)
+} else {
+  ggp$genes = ggp$genes + geom_point(aes(x=pos, y=0), size=2, data=tss.df,
+                                     shape=4, alpha=.7)
+}
 
 ## add the vertical lines highlighting the variants calls (if present)
 if(!is.null(var.vl) & 'coverage' %in% names(ggp)){

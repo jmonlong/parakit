@@ -90,8 +90,10 @@ pars_viz.add_argument('-l', help='a label to use as title of the graphs.',
 pars_viz.add_argument('-m', help='maximum number of supporting reads to '
                       'show in graph', default=3)
 pars_viz.add_argument('-o', help='output PDF file', default='parakit.viz.pdf')
-pars_viz.add_argument('-s', help='Optional. R script to run instead of '
+pars_viz.add_argument('-S', help='Optional. R script to run instead of '
                       'the one provided.', default='')
+pars_viz.add_argument('-s', default='pangenome',
+                      help='Optional. Scale for the x-axis. Either pangenome or genome. ')
 pars_viz.add_argument('-t', help='debug trace mode', action='store_true')
 pars_viz.set_defaults(scmd='viz')
 
@@ -242,8 +244,8 @@ def scmd_viz(args):
     # visualize using R script
     script_path = os.path.join(os.path.dirname(__file__),
                                'parakit.viz.R')
-    if args.s != '':
-        script_path = args.s
+    if args.S != '':
+        script_path = args.S
     # update/guess paths before
     args.n = pkio.nodeFile(config, fn=args.n, check_file=True)
     args.e = pkio.geneFile(args.e, config, check_file=True)
