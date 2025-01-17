@@ -42,16 +42,9 @@ def findPaths(nodes, reads, args):
         pathn = best_paths[mii]
         aln_score[pathn] = pathReadGraphAlign(paths[pathn],
                                               reads.path, nodes)
-    # precompute weight for each read
-    read_weights = {}
+    # sort the reads by length
     longest_reads = sorted(list(reads.path.keys()),
                            key=lambda k: -len(reads.path[k]))
-    longest_read_l = len(reads.path[longest_reads[0]])
-    for readn in reads.path:
-        # read_w = math.exp(20*len(reads[readn])/longest_read_l)
-        # read_w = 1 - float(longest_reads.index(readn)) / len(longest_reads)
-        read_w = 1
-        read_weights[readn] = read_w
     # precompute read coverage on each node
     read_cov = {}
     for nod in nodes:
@@ -79,10 +72,9 @@ def findPaths(nodes, reads, args):
         for mjj in range(mii, len(best_paths)):
             mode1 = best_paths[mii]
             mode2 = best_paths[mjj]
-            # node_cov = pathNodeCoverage(path1 + path2, nodes)
             esc = evaluatePaths(read_cov, path_cov[mode1], path_cov[mode2],
                                 nodes, reads.path,
-                                read_weights, longest_reads,
+                                longest_reads,
                                 aln_score[mode1], aln_score[mode2])
             esc['hap1'] = mode1
             esc['hap2'] = mode2
@@ -102,10 +94,6 @@ def findPaths(nodes, reads, args):
     escores_r = sorted(escores,
                        key=lambda k: k['cov_dev_adj'] + k['aln_score_adj'],
                        reverse=True)
-    # escores_r = sorted(escores,
-    #                    key=lambda k: k['cov_cor_adj'] + k['aln_score_adj'],
-    #                    reverse=True)
-
     return ({'escores': escores_r, 'paths': paths})
 
 
@@ -134,7 +122,6 @@ def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3):
             sreads_list.append(csreads.subsetByCluster(1))
         # iterate until no clear markers suggesting two alleles
     # enumerate alleles
-    # TODO try without doubling the minimum read support here
     res = sreads.enumerateAlleles(sreads_list_final, max_cycles=4,
                                   min_read_support=min_read_support)
     return (res)
@@ -201,23 +188,8 @@ def pathReadGraphAlign(path, reads, nodes={}, max_node_gap=10):
     return read_scores
 
 
-# def pathNodeCoverage(path, nodes):
-#     # compute the node coverage in path and reads
-#     node_cov = {}
-#     for nod in nodes:
-#         # if nodes[nod]['class'] != 'none':
-#         readc = 0
-#         if 'reads' in nodes[nod]:
-#             readc = len(nodes[nod]['reads'])
-#         node_cov[nod] = {'reads': readc, 'path': 0}
-#     for nod in path:
-#         # if nodes[nod]['class'] != 'none':
-#         node_cov[nod]['path'] += 1
-#     return node_cov
-
-
 def evaluatePaths(read_cov, path_cov_1, path_cov_2,
-                  nodes, reads, read_ws,
+                  nodes, reads,
                   longest_reads, read_aln, read_aln2=[]):
     # correlation between coverage on the predicted path and the reads
     read_c = []
@@ -259,9 +231,8 @@ def evaluatePaths(read_cov, path_cov_1, path_cov_2,
         r_score = read_aln[readn]
         if len(read_aln2) > 0:
             r_score = max(read_aln2[readn], r_score)
-        read_w = read_ws[readn]
-        aln_score += read_w * r_score
-        w_sum += read_w
+        aln_score += r_score
+        w_sum += 1
     aln_score = float(aln_score) / w_sum
     # count how many of the top longest reads align well
     rii = 0
