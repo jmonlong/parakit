@@ -102,30 +102,74 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
     fus_reads = {}
     for readn in reads.path:
         # prepare a marker profile vector
-        marks = []
+        marks_n = []
         marks_c = []
-        for nod in reads.path[readn]:
+        marks_p1 = []
+        marks_p2 = []
+        for ii, nod in enumerate(reads.path[readn]):
             if nodes[nod]['class'] == 'c1':
-                marks.append(nod)
+                marks_n.append(nod)
                 marks_c.append('c1')
+                # save the position in module 1 and 2
+                if nodes[nod]['rpos_min'] != nodes[nod]['rpos_min']:
+                    # use pos min and max if different
+                    marks_p1.append(nodes[nod]['rpos_min'])
+                    marks_p2.append(nodes[nod]['rpos_max'])
+                else:
+                    # if they're the same, we're missing the max
+                    marks_p1.append(nodes[nod]['rpos_min'])
+                    # look for the next node with a informative rpos_max
+                    tpos = -1
+                    jj = ii + 1
+                    while jj < len(reads.path[readn]) and tpos == -1:
+                        nodj = reads.path[readn][jj]
+                        if nodes[nodj]['rpos_min'] != nodes[nodj]['rpos_max']:
+                            tpos = nodes[nodj]['rpos_max']
+                        jj += 1
+                    marks_p2.append(tpos)
             elif nodes[nod]['class'] == 'c2':
-                marks.append(nod)
+                marks_n.append(nod)
                 marks_c.append('c2')
+                # save the position in module 1 and 2
+                if nodes[nod]['rpos_min'] != nodes[nod]['rpos_min']:
+                    # use pos min and max if different
+                    marks_p1.append(nodes[nod]['rpos_min'])
+                    marks_p2.append(nodes[nod]['rpos_max'])
+                else:
+                    # if they're the same, we're missing the min
+                    marks_p2.append(nodes[nod]['rpos_max'])
+                    # look for the next node with a informative rpos_max
+                    tpos = -1
+                    jj = ii - 1
+                    while jj > 0 and tpos == -1:
+                        nodj = reads.path[readn][jj]
+                        if nodes[nodj]['rpos_min'] != nodes[nodj]['rpos_max']:
+                            tpos = nodes[nodj]['rpos_min']
+                        jj += -1
+                    marks_p1.append(tpos)
         # skip if not enough markers for the test
-        if len(marks) < nmarkers * 2:
+        if len(marks_n) < nmarkers * 2:
             continue
         # compute a score to measure how much the flank are c1-c2 specific
-        for ii in range(nmarkers, len(marks) - nmarkers):
-            c1_n = marks_c[(ii-nmarkers):ii].count('c1')
+        for ii in range(nmarkers, len(marks_n) - nmarkers):
+            c1_n = marks_c[(ii-nmarkers+1):(ii+1)].count('c1')
             c2_n = marks_c[(ii+1):(ii+nmarkers+1)].count('c2')
             score = min(c2_n / nmarkers, c1_n / nmarkers)
             # save any position over the minimum score threshold
             if score > .8:
-                if marks[ii] not in fus_reads:
-                    fus_reads[marks[ii]] = []
-                fus_reads[marks[ii]].append(readn)
+                # save info about the breakpoint
+                fus_info = {'node_l': marks_n[ii],
+                            'pos_l_1': marks_p1[ii],
+                            'pos_l_2': marks_p2[ii],
+                            'node_u': marks_n[ii+1],
+                            'pos_u_1': marks_p1[ii+1],
+                            'pos_u_2': marks_p2[ii+1],
+                            'readn': readn}
+                if marks_n[ii] not in fus_reads:
+                    fus_reads[marks_n[ii]] = []
+                fus_reads[marks_n[ii]].append(fus_info)
             if c2_n / nmarkers > .5 and c1_n / nmarkers < .5 and \
-               nodes[marks[ii]]['rpos_min'] > min_pos_var:
+               nodes[marks_n[ii]]['rpos_min'] > min_pos_var:
                 cand_func_reads[readn] = True
     # filter candidate fusions
     # keep nodes in range and one per read
@@ -141,20 +185,44 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
             continue
         # check that enough unused supporting reads
         fus_sup_reads = 0
-        for readn in fus_reads[fusnod]:
-            if readn not in used_reads:
+        for fus_info in fus_reads[fusnod]:
+            if fus_info['readn'] not in used_reads:
                 fus_sup_reads += 1
         if fus_sup_reads >= 3:
             # save fusion
             # fusion name
-            fus_n = '{}_FUS'.format(fusnod)
-            # start positions: around the current node
-            fus_s_l = pos_offset + nodes[fusnod]['rpos_min']
-            fus_e_l = pos_offset + nodes[fusnod]['rpos_max']
-            # anno['node'][fus_n] = fus
+            fus_n = 'FUS_{}'.format(fusnod)
+            # lower and upper bounds of the confidence interval
+            pos_l_1 = []
+            pos_l_2 = []
+            pos_u_1 = []
+            pos_u_2 = []
+            node_u = []
+            for fus_info in fus_reads[fusnod]:
+                if fus_info['pos_l_1'] != -1:
+                    pos_l_1.append(fus_info['pos_l_1'])
+                if fus_info['pos_l_2'] != -1:
+                    pos_l_2.append(fus_info['pos_l_2'])
+                if fus_info['pos_u_1'] != -1:
+                    pos_u_1.append(fus_info['pos_u_1'])
+                if fus_info['pos_u_2'] != -1:
+                    pos_u_2.append(fus_info['pos_u_2'])
+                node_u.append(fus_info['node_u'])
+            pos_l_1 = min(pos_l_1)
+            pos_l_2 = min(pos_l_2)
+            pos_u_1 = max(pos_u_1)
+            pos_u_2 = max(pos_u_2)
+            node_u = max(node_u)
+            # used to report fusions and other variants
             var_node[fus_n] = [fusnod, fusnod]
-            fus_reads_f[fus_n] = fus_reads[fusnod]
-            for readn in fus_reads[fusnod]:
+            # save info
+            fus_reads_f[fus_n] = {'pos_l_1': pos_l_1,
+                                  'pos_l_2': pos_l_2,
+                                  'pos_u_1': pos_u_1,
+                                  'pos_u_2': pos_u_2,
+                                  'node_u': node_u}
+            for fus_info in fus_reads[fusnod]:
+                readn = fus_info['readn']
                 # mark reads as "used"
                 used_reads[readn] = True
                 # remember that this read support this fusion
@@ -179,21 +247,15 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
                 if readn not in read_sum:
                     cand_func_reads[readn] = True
 
-    # var_calls = {}
-    # var_calls['var_reads_f'] = var_reads_f
-    # var_calls['var_reads_ref'] = var_reads_ref
-    # var_calls['fus_reads_f'] = fus_reads_f
-    # var_calls['read_sum'] = read_sum
-    # var_calls['cand_func_reads'] = cand_func_reads
-    # var_calls['var_node'] = var_node
-
     # print read support summary
     print("Covered variants and their supporting reads:\n")
     # order variants by position
     var_names = sorted(list(var_reads_f) + list(fus_reads_f),
                        key=lambda k: nodes[var_node[k][0]]['rpos_max'])
     # prepare TSV output
-    for_tsv = ['\t'.join(['read', 'variant', 'node', 'allele'])]
+    for_tsv = ['\t'.join(['read', 'variant', 'node', 'allele', 'node_u',
+                          'pos_l_1', 'pos_l_2', 'pos_u_1', 'pos_u_2'])]
+    for_tsv_nas = '\t'.join(['NA']*5)
     printed_reads = {}
     for read in list(read_sum.keys()) + list(cand_func_reads.keys()):
         # don't write multiple time the same read
@@ -207,15 +269,26 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
                 if varid in var_reads_ref and read in var_reads_ref[varid]:
                     # if so, print ----
                     to_print += '-' * len(varid) + '\t'
-                    for_tsv.append(for_tsv_r + '\tref')
+                    for_tsv.append(for_tsv_r + '\tref\t' + for_tsv_nas)
                 else:
                     # if not, print a gap
                     to_print += ' ' * len(varid) + '\t'
-                    for_tsv.append(for_tsv_r + '\tna')
+                    for_tsv.append(for_tsv_r + '\tNA\t' + for_tsv_nas)
             else:
                 # the read goes through the variant, print the variant name
                 to_print += varid + '\t'
-                for_tsv.append(for_tsv_r + '\talt')
+                if varid in fus_reads_f:
+                    # it's a fusion, let's also print breakpoint information
+                    fus_info = fus_reads_f[varid]
+                    fus_bkpt = [fus_info['node_u'],
+                                fus_info['pos_l_1'] + pos_offset,
+                                fus_info['pos_l_2'] + pos_offset,
+                                fus_info['pos_u_1'] + pos_offset,
+                                fus_info['pos_u_2'] + pos_offset]
+                    fus_bkpt = '\t'.join([str(ii) for ii in fus_bkpt])
+                    for_tsv.append(for_tsv_r + '\talt\t' + fus_bkpt)
+                else:
+                    for_tsv.append(for_tsv_r + '\talt\t' + for_tsv_nas)
         print(to_print)
         printed_reads[read] = True
     print()
