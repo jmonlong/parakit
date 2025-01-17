@@ -40,7 +40,7 @@ pars_call.add_argument('-g', help='input GFA pangenome', default='')
 pars_call.add_argument('-a', help='annotation file (e.g. from ClinVar)',
                        default='')
 pars_call.add_argument('-m', help='number of markers checked around the SNPs',
-                       default=10, type=int)
+                       default=20, type=int)
 pars_call.add_argument('-o', help='output TSV', required=True)
 pars_call.set_defaults(scmd='call')
 
@@ -52,7 +52,7 @@ pars_paths.add_argument('-n', help='node information', default='')
 pars_paths.add_argument('-g', help='input GFA pangenome', default='')
 pars_paths.add_argument('-r', help='input alignments in GAF', required=True)
 pars_paths.add_argument('-o', help='output TSV prefix', required=True)
-pars_paths.add_argument('-c', default=4, type=float,
+pars_paths.add_argument('-c', default=3, type=float,
                         help='minimum read support for subread clustering.')
 pars_paths.set_defaults(scmd='paths')
 
@@ -75,8 +75,8 @@ pars_annotate.set_defaults(scmd='annotate')
 
 # viz subcommand: make different graphs of the results
 pars_viz = spars.add_parser('viz', help='visualize the results')
-pars_viz.add_argument('-v', help='visualization mode: allele_support',
-                      default='allele_support')
+pars_viz.add_argument('-v', help='visualization mode: allele_support, calls, paths, all, all_small',
+                      default='all_small')
 pars_viz.add_argument('-j', help='config JSON file', required=True)
 pars_viz.add_argument('-n', help='node information', default='')
 pars_viz.add_argument('-e', help='input genome element annotation TSV',
