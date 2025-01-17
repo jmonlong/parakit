@@ -25,7 +25,7 @@ args$out = list(arg='-o', desc='output PDF file', val='parakit.viz.pdf')
 
 ## parse arguments
 args.i = commandArgs(TRUE)
-## args.i = unlist(strsplit('-j rccx.grch38_hprc.mc.config.json -v all_small -n rccx.grch38_hprc.mc.node_info.tsv -e CYP21A2.gencodev43.nearby_genes.tsv -o results/rccx.grch38_hprc.mc/DEN63292/DEN63292.all_small.pdf -m 1 -c results/rccx.grch38_hprc.mc/DEN63292/DEN63292.calls.tsv -r results/rccx.grch38_hprc.mc/DEN63292/DEN63292.all_small.pdf.tsv -d results/rccx.grch38_hprc.mc/DEN63292/DEN63292.paths-stats.tsv -p results/rccx.grch38_hprc.mc/DEN63292/DEN63292.paths-info.tsv -l DEN63292', ' '))
+## args.i = unlist(strsplit('-j rccx.grch38_hprc.mc.config.json -v all_small -n rccx.grch38_hprc.mc.node_info.tsv -e CYP21A2.gencodev43.nearby_genes.tsv -o results/rccx.grch38_hprc.mc/DEN63190/DEN63190.all_small.pdf -m 1 -c results/rccx.grch38_hprc.mc/DEN63190/DEN63190.calls.tsv -r results/rccx.grch38_hprc.mc/DEN63190/DEN63190.all_small.pdf.tsv -d results/rccx.grch38_hprc.mc/DEN63190/DEN63190.paths-stats.tsv -p results/rccx.grch38_hprc.mc/DEN63190/DEN63190.paths-info.tsv -l DEN63190', ' '))
 arg.to.arg = names(args)
 names(arg.to.arg) = as.character(sapply(args, function(l) l$arg))
 ii = 1
@@ -136,10 +136,11 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
   ## load read-variants table
   vars = read.table(args$calls$val, as.is=TRUE, header=TRUE, check.names=F)
   vars = vars %>% mutate(variant=factor(variant, unique(variant)),
-                         allele=factor(allele, c('alt', 'ref', 'na')))
+                         allele=factor(allele, c('alt', 'ref', 'NA')))
 
   ## cluster reads
-  vars.m = vars %>% mutate(allele=as.numeric(allele)) %>% select(-node) %>%
+  vars.m = vars %>% mutate(allele=as.numeric(allele)) %>% select(read, variant, allele) %>%
+    mutate(allele=ifelse(is.na(allele), '0', allele)) %>% 
     unique %>% 
     pivot_wider(id_cols=read, names_from=variant, values_from=allele)
   read.ord = vars.m$read
@@ -174,7 +175,11 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
   ## the points to highlight the variant calls on the reads
   ggp.vars.pts = ggp.vars.df %>% 
     group_by(read) %>%
-    filter(!is.na(variant) & path_part == max(path_part))
+    filter(!is.na(variant) & path_part == max(path_part)) %>% 
+    mutate(node=ifelse(!is.na(node_u), (node + node_u)/2, node),
+           variant=ifelse(!is.na(node_u),
+                          paste0(round((pos_l_1 + pos_u_1)/2), '_FUS_',
+                                 round((pos_l_2 + pos_u_2)/2)), as.character(variant)))
 
   ## vertical dotted line to help following the variants called
   var.vl = geom_vline(xintercept=unique(ggp.vars.pts$node), linetype=3, linewidth=.3)
@@ -364,12 +369,12 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
   ggp$coverage = ggp$coverage +
     geom_point(alpha=.7) +
     theme_bw() +
-    geom_hline(yintercept=4, linetype=2) +
-    geom_hline(yintercept=med.cov.2, linetype=3) +
-    geom_hline(yintercept=fl_cyc_cn, linetype=4) +
+    geom_hline(yintercept=4, linetype=1, alpha=.1) +
+    geom_hline(yintercept=med.cov.2, linetype=2, alpha=.7) +
+    geom_hline(yintercept=fl_cyc_cn, linetype=3, alpha=.7) +
     ylab('estimated\ncopy number') +
     facet_grid("coverage\n"~.) +
-    scale_y_continuous(breaks=c(round(fl_cyc_cn, 2), seq(0,10,2))) + 
+    scale_y_continuous(breaks=seq(0,10,2)) + 
     theme(legend.position='top', strip.text.y=element_text(angle=0))
 
   ## save the x-axis boundaries for later
