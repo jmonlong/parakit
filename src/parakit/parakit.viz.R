@@ -390,7 +390,7 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
 ## haplotypes
 ##
 
-if(args$viz$val %in% c('paths', 'all', 'all_small')){
+if(args$viz$val %in% c('diplotype', 'all', 'all_small')){
   ## load stats on pairs of predicted haplotypes
   stats = read.table(args$hstats$val, as.is=TRUE, header=TRUE)
   ## load information for each predicted haplotype
@@ -705,7 +705,7 @@ if(args$viz$val == 'calls'){
             ncol=1, align='v', rel_heights=c(4,1.8))
 }
 
-if(args$viz$val == 'paths'){
+if(args$viz$val == 'diplotype'){
   plot_grid(ggp$haps +
             ggp.xlims + nox,
             ggp$genes + ggp.xlims + labs(caption=args$label$val),

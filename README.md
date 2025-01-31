@@ -83,7 +83,7 @@ The reads/calls are saved in `calls.tsv`.
 To list and evaluate candidate diplotype:
 
 ```bash
-parakit paths -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o diplotype
+parakit diplotype -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o diplotype
 ```
 
 This command creates two files: 
@@ -98,7 +98,7 @@ The *all* mode, will make a multi-panel figure summarizing all analysis.
 parakit viz -v all -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -c calls.tsv -d diplotype.paths-stats.tsv -p diplotype.paths-info.tsv -o parakit.out.pdf
 ```
 
-Other modes include: *calls*, *allele_support*, *paths*.
+Other modes include: *calls*, *allele_support*, *diplotype*.
 
 ## Output
 

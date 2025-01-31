@@ -30,7 +30,7 @@ pars_map.add_argument('-o', help='output GAF file', required=True)
 pars_map.add_argument('-t', help='debug trace mode', action='store_true')
 pars_map.set_defaults(scmd='map')
 
-# call subcommand: variant calls by aggregating read support
+# call subcommand: calls variant by aggregating read support
 pars_call = spars.add_parser('call',
                              help='call variants by aggregating read support')
 pars_call.add_argument('-j', help='config JSON file', required=True)
@@ -44,17 +44,17 @@ pars_call.add_argument('-m', help='number of markers checked around the SNPs',
 pars_call.add_argument('-o', help='output TSV', required=True)
 pars_call.set_defaults(scmd='call')
 
-# paths subcommand: variant paths by aggregating read support
-pars_paths = spars.add_parser('paths',
-                              help='find paths best supported by reads')
-pars_paths.add_argument('-j', help='config JSON file', default='')
-pars_paths.add_argument('-n', help='node information', default='')
-pars_paths.add_argument('-g', help='input GFA pangenome', default='')
-pars_paths.add_argument('-r', help='input alignments in GAF', required=True)
-pars_paths.add_argument('-o', help='output TSV prefix', required=True)
-pars_paths.add_argument('-c', default=3, type=float,
+# diplotype subcommand: find the best pair of paths by aggregating read support
+pars_diplotype = spars.add_parser('diplotype',
+                              help='find diplotype best supported by reads')
+pars_diplotype.add_argument('-j', help='config JSON file', default='')
+pars_diplotype.add_argument('-n', help='node information', default='')
+pars_diplotype.add_argument('-g', help='input GFA pangenome', default='')
+pars_diplotype.add_argument('-r', help='input alignments in GAF', required=True)
+pars_diplotype.add_argument('-o', help='output TSV prefix', required=True)
+pars_diplotype.add_argument('-c', default=3, type=float,
                         help='minimum read support for subread clustering.')
-pars_paths.set_defaults(scmd='paths')
+pars_diplotype.set_defaults(scmd='diplotype')
 
 # annotate subcommand: annotate sequence(s) from a FASTA file
 pars_annotate = spars.add_parser('annotate',
@@ -75,7 +75,7 @@ pars_annotate.set_defaults(scmd='annotate')
 
 # viz subcommand: make different graphs of the results
 pars_viz = spars.add_parser('viz', help='visualize the results')
-pars_viz.add_argument('-v', help='visualization mode: allele_support, calls, paths, all, all_small',
+pars_viz.add_argument('-v', help='visualization mode: allele_support, calls, diplotype, all, all_small',
                       default='all_small')
 pars_viz.add_argument('-j', help='config JSON file', required=True)
 pars_viz.add_argument('-n', help='node information', default='')
@@ -181,7 +181,7 @@ def scmd_call(args):
                        output_tsv=args.o)
 
 
-def scmd_paths(args):
+def scmd_diplotype(args):
     # read config json file
     config = {}
     if args.j != '':
@@ -276,8 +276,8 @@ def main():
         scmd_map(args)
     elif args.scmd == 'call':
         scmd_call(args)
-    elif args.scmd == 'paths':
-        scmd_paths(args)
+    elif args.scmd == 'diplotype':
+        scmd_diplotype(args)
     elif args.scmd == 'viz':
         scmd_viz(args)
     elif args.scmd == 'copy':
