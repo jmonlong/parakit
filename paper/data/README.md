@@ -1,0 +1,9 @@
+- Pangenome information
+    - `rccx.grch38_hprc.mc.pg.gfa`
+    - `rccx.grch38_hprc.mc.node_info.tsv`
+- Annotation files
+    - `CYP21A2.gencodev43.nearby_genes.tsv`
+    - `CYP21A2.pathogenic.variant_summary.2024_09_03.tsv`
+- Long-read sequencing data for one sample (only the *chr6:31800000-32200000* region).
+    - `testsample.chr6_31800000_32200000.bam`
+    - `testsample.chr6_31800000_32200000.bam.bai`

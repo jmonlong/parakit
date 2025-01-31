@@ -1,7 +1,18 @@
 # Data and figures
 
-Data to reproduce the figures is available (*soon*) in the [`data`](data) directory.
-Scripts and PDF files were placed in the [`figures`](figures) directory.
+Data to reproduce the figures is available in the [`data`](data) directory.
+Scripts to reproduce some of the figures were placed in the [`figures`](figures) directory.
+
+To test and reproduce an analysis with Parakit, we are sharing the data from one sample in `data/testsample.chr6_31800000_32200000.bam`.
+The files for the pangenome and annotation are also provided so the *Pangenome construction* step can be skipped.
+
+If you prefer to use the docker container with all the dependencies installed, start it with something like:
+
+```sh
+docker run -it -v `pwd`:/app -w /app -u `id -u $USER` quay.io/jmonlong/parakit:1.0.0
+```
+
+If you just want to see what the output files would look like, see the [`testsample_output`](testsample_output) directory.
 
 # Methods
 
@@ -30,6 +41,10 @@ parakit construct -j rccx.grch38_hprc.mc.config.json
 
 The JSON configuration file contains information about the location of the GRCh38 reference FASTA file, coordinates of each module, size of the flanking regions, location of the HPRC assemblies.
 
+Note: to reproduce this step, see detailed instructions in the [`../data`](../data) directory on how to download and prepare all the necessary files. 
+Running the command from this directory **will not** work.
+Again, this step is not required to for commands below because we are sharing the pangenome files.
+
 ## Alignment of long-reads to the pangenome
 
 Parakit first extracts reads in the region of interest from an indexed BAM. 
@@ -43,7 +58,7 @@ Internally, Parakit uses GraphAligner v1.0.17 with variation graph mode (`-x vg`
 To extract and map long reads to the pangenome with Parakit, we ran:
 
 ```
-parakit map -j rccx.grch38_hprc.mc.config.json -b SAMP.wgs.bam -o SAMP.rccx.grch38_hprc.mc.gaf.gz
+parakit map -j rccx.grch38_hprc.mc.config.json -b data/testsample.chr6_31800000_32200000.bam -o testsample.rccx.grch38_hprc.mc.gaf.gz
 ```
 
 The output is a GAF file representing the alignment of each read through the pangenome.
@@ -63,7 +78,7 @@ For both fusions and gene conversion variants, Parakit reports sites with at lea
 
 To call variants with Parakit, we ran:
 ```
-parakit call -r SAMP.rccx.grch38_hprc.mc.gaf.gz -j rccx.grch38_hprc.mc.config.json -o SAMP.rccx.grch38_hprc.mc.calls.tsv
+parakit call -r testsample.rccx.grch38_hprc.mc.gaf.gz -j rccx.grch38_hprc.mc.config.json -o testsample.rccx.grch38_hprc.mc.calls.tsv
 ```
 
 ## Coverage and allele ratio along the pangenome
@@ -127,7 +142,7 @@ The pair of haplotypes that results in the highest read identity and most unifor
 The command to reconstruct haplotypes was:
 
 ```
-parakit diplotype -j rccx.grch38_hprc.mc.config.json -r SAMP.rccx.grch38_hprc.mc.gaf.gz -o SAMP.rccx.grch38_hprc.mc
+parakit diplotype -j rccx.grch38_hprc.mc.config.json -r testsample.rccx.grch38_hprc.mc.gaf.gz -o testsample.rccx.grch38_hprc.mc
 ```
 
 ## Visualization of the results
@@ -139,7 +154,7 @@ It includes a gene annotation track with the exons and introns for the genes in 
 The command used to generate a PDF file with the graph was:
 
 ```
-parakit viz -j rccx.grch38_hprc.mc.config.json -r SAMP.rccx.grch38_hprc.mc.gaf.gz -c SAMP.rccx.grch38_hprc.mc.calls.tsv -d SAMP.rccx.grch38_hprc.mc.paths-stats.tsv -p SAMP.rccx.grch38_hprc.mc.paths-info.tsv -o SAMP.rccx.grch38_hprc.mc.pdf
+parakit viz -j rccx.grch38_hprc.mc.config.json -r testsample.rccx.grch38_hprc.mc.gaf.gz -c testsample.rccx.grch38_hprc.mc.calls.tsv -d testsample.rccx.grch38_hprc.mc.paths-stats.tsv -p testsample.rccx.grch38_hprc.mc.paths-info.tsv -o testsample.rccx.grch38_hprc.mc.pdf
 ```
 
-
+The PDF shows evidence of a trimodular allele carrying a pathogenic SNV, and a fusion allele (see [pdf](testsample_output/testsample.rccx.grch38_hprc.mc.pdf)).

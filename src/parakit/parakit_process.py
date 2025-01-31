@@ -32,6 +32,10 @@ def getRegionsFromConfig(config):
 
 
 def prepareRefSeqsForMc(config):
+    ## We need to add a check for directory existence, which will probably not exist when running for the first time. 
+    ## `writeFasta` may not have permissions to create the seqs/ directory and then write the file inside it.
+    if not os.path.exists("seqs"):
+        os.makedirs("seqs")
     print('Extracting reference sequences.')
     ref_fa = pyfaidx.Fasta(config['ref_fa'])
     c1, c2, reg_s, reg_e = getRegionsFromConfig(config)
@@ -50,6 +54,10 @@ def prepareRefSeqsForMc(config):
 
 
 def prepareHprcSeqsForMc(config):
+    ## We need to add a check for directory existence, which will probably not exist when running for the first time. 
+    ## `writeFasta` may not have permissions to create the seqs/ directory and then write the file inside it.
+    if not os.path.exists("seqs"):
+        os.makedirs("seqs")
     hprc_seqs_for_mc = []
     coord_inf = open(config['hprc_coords'], 'rt')
     for line in coord_inf:
@@ -99,30 +107,41 @@ def constructPgMc(config, opref, pg_gfa):
                   ' --outDir ' + mc_outdir_fn + ' --outName mc_pg' +
                   ' --reference ref_noc2 --gfa\n')
     mc_sh_f.close()
-    # get USER id to make sure the file permission are correct with docker
-    id_o = subprocess.run(['id', '-u', os.getenv('USER')],
-                          check=True, capture_output=True)
-    mc_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
-              '-w', '/app',
-              '-u', id_o.stdout.decode().rstrip(),
-              'quay.io/comparative-genomics-toolkit/cactus:v2.9.3',
-              'sh', mc_sh_fn]
     if os.path.isfile(mc_outdir_fn + '/mc_pg.gfa.gz') or \
        os.path.isfile(mc_outdir_fn + '/mc_pg.gfa'):
         print("Skipping Cactus-Minigraph.")
     else:
+        # check if cactus-minigraph is installed
+        if toolAvailable('cactus-pangenome'):
+            mc_cmd = ['sh', mc_sh_fn]
+        elif toolAvailable('docker'):
+            # get USER id to make sure the file permission are correct with docker
+            id_o = subprocess.run(['id', '-u', os.getenv('USER')],
+                                  check=True, capture_output=True)
+            mc_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
+                      '-w', '/app',
+                      '-u', id_o.stdout.decode().rstrip(),
+                      'quay.io/comparative-genomics-toolkit/cactus:v2.9.3',
+                      'sh', mc_sh_fn]
+        else:
+            print("Either cactus-pangenome or docker must be installed")
         subprocess.run(mc_cmd, check=True)
     # add reference path by aligning with GraphAligner
     if not os.path.isfile(mc_outdir_fn + '/mc_pg.gfa'):
         subprocess.run(['gunzip', mc_outdir_fn + '/mc_pg.gfa.gz'],
                        check=True)
-    ga_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
-              '-w', '/app',
-              '-u', id_o.stdout.decode().rstrip(),
-              'quay.io/biocontainers/graphaligner:1.0.17b--h21ec9f0_2',
-              'GraphAligner', '-g', mc_outdir_fn + '/mc_pg.gfa',
+    # check if cactus-minigraph is installed
+    ga_cmd = ['GraphAligner', '-g', mc_outdir_fn + '/mc_pg.gfa',
               '-f', 'seqs/ref_full.fa', '-a', mc_outdir_fn + '/ref.gaf',
               '-x', 'vg']
+    if not toolAvailable('GraphAligner') and toolAvailable('docker'):
+        ga_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
+                  '-w', '/app',
+                  '-u', id_o.stdout.decode().rstrip(),
+                  'quay.io/biocontainers/graphaligner:1.0.17b--h21ec9f0_2'
+                  ] + ga_cmd
+    elif not toolAvailable('GraphAligner'):
+        print("Either GraphAligner or docker must be installed")
     outf = open(mc_outdir_fn + '/mc_pg.pg', 'w')
     subprocess.run(ga_cmd, check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -163,6 +182,10 @@ def prepareRefSeqsForPggb(config):
 
 
 def prepareHprcSeqsForPggb(config):
+    ## We need to add a check for directory existence, which will probably not exist when running for the first time. 
+    ## `writeFasta` may not have permissions to create the seqs/ directory and then write the file inside it.
+    if not os.path.exists("seqs"):
+        os.makedirs("seqs")
     hprc_seqs_for_pggb = []
     hprc_seqs_for_pggb_names = []
     coord_inf = open(config['hprc_coords'], 'rt')
@@ -212,18 +235,24 @@ def constructPgMcCollapse(config, opref, pg_gfa):
                   ' --outDir ' + mc_outdir_fn + ' --outName mc_collapse_pg' +
                   ' --reference ref --collapse --gfa\n')
     mc_sh_f.close()
-    # get USER id to make sure the file permission are correct with docker
-    id_o = subprocess.run(['id', '-u', os.getenv('USER')],
-                          check=True, capture_output=True)
-    mc_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
-              '-w', '/app',
-              '-u', id_o.stdout.decode().rstrip(),
-              'quay.io/comparative-genomics-toolkit/cactus:v2.9.3',
-              'sh', mc_sh_fn]
     if os.path.isfile(mc_outdir_fn + '/mc_collapse_pg.gfa.gz') or \
        os.path.isfile(mc_outdir_fn + '/mc_collapse_pg.gfa'):
         print("Skipping Cactus-Minigraph.")
     else:
+        # check if cactus-minigraph is installed
+        if toolAvailable('cactus-pangenome'):
+            mc_cmd = ['sh', mc_sh_fn]
+        elif toolAvailable('docker'):
+            # get USER id to make sure the file permission are correct with docker
+            id_o = subprocess.run(['id', '-u', os.getenv('USER')],
+                                  check=True, capture_output=True)
+            mc_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
+                      '-w', '/app',
+                      '-u', id_o.stdout.decode().rstrip(),
+                      'quay.io/comparative-genomics-toolkit/cactus:v2.9.3',
+                      'sh', mc_sh_fn]
+        else:
+            print("Either cactus-pangenome or docker must be installed")
         subprocess.run(mc_cmd, check=True)
     # reorient some nodes. requires conversion to VG graph and back
     if not os.path.isfile(mc_outdir_fn + '/mc_collapse_pg.gfa'):
@@ -271,14 +300,20 @@ def constructPgPggb(config, opref, pg_gfa, threads=1):
                                                                  len(fa_files),
                                                                  threads))
     pggb_sh_f.close()
-    # get USER id to make sure the file permission are correct with docker
-    id_o = subprocess.run(['id', '-u', os.getenv('USER')],
-                          check=True, capture_output=True)
-    pggb_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
-                '-w', '/app',
-                '-u', id_o.stdout.decode().rstrip(),
-                'ghcr.io/pangenome/pggb:latest',
-                'sh', pggb_sh_fn]
+    # check if cactus-minigraph is installed
+    if toolAvailable('pggb') and toolAvailable('samtools'):
+        pggb_cmd = ['sh', pggb_sh_fn]
+    elif toolAvailable('docker'):
+        # get USER id to make sure the file permission are correct with docker
+        id_o = subprocess.run(['id', '-u', os.getenv('USER')],
+                              check=True, capture_output=True)
+        pggb_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
+                    '-w', '/app',
+                    '-u', id_o.stdout.decode().rstrip(),
+                    'ghcr.io/pangenome/pggb:latest',
+                    'sh', pggb_sh_fn]
+    else:
+        print("Either pggb and samtools, or docker must be installed")
     subprocess.run(pggb_cmd, check=True)
     # move/copy final GFA to pg_gfa
     for fn in os.listdir(pggb_outdir):
@@ -316,21 +351,25 @@ def extractReads(config, in_reads, out_fq, trace=False):
 
 
 def mapReads(in_fq, pg_gfa, out_gaf):
-    # get USER id to make sure the file permission are correct with docker
-    id_o = subprocess.run(['id', '-u', os.getenv('USER')],
-                          check=True, capture_output=True)
     # GraphAligner outputs an unzipped GAF file
     ga_gaf = out_gaf
     if out_gaf.endswith('.gz'):
         # if we want an gzipped output, make a temporary GAF
         # that will be zipped later
         ga_gaf = out_gaf + '.gaf'
-    ga_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
-              '-w', '/app',
-              '-u', id_o.stdout.decode().rstrip(),
-              'quay.io/biocontainers/graphaligner:1.0.17b--h21ec9f0_2',
-              'GraphAligner', '-g', pg_gfa, '-f', in_fq, '-a', ga_gaf,
-              '-x', 'vg', '-b', '100']
+    # check if cactus-minigraph is installed
+    if toolAvailable('cactus-pangenome'):
+        ga_cmd = ['GraphAligner', '-g', pg_gfa, '-f', in_fq, '-a', ga_gaf,
+                  '-x', 'vg', '-b', '100']
+    elif toolAvailable('docker'):
+        # get USER id to make sure the file permission are correct with docker
+        id_o = subprocess.run(['id', '-u', os.getenv('USER')],
+                              check=True, capture_output=True)
+        ga_cmd = ['docker', 'run', '-it', '-v', os.getcwd() + ':/app',
+                  '-w', '/app',
+                  '-u', id_o.stdout.decode().rstrip(),
+                  'quay.io/biocontainers/graphaligner:1.0.17b--h21ec9f0_2',
+                  ] + ga_cmd
     subprocess.run(ga_cmd, check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if out_gaf.endswith('.gz'):
@@ -417,3 +456,10 @@ def runRscript(script_r, args):
     else:
         subprocess.run(rscript_cmd, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def toolAvailable(tool_name):
+    check_cmd = ['which', tool_name]
+    check_o = subprocess.run(check_cmd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+    return (check_o.returncode == 0)

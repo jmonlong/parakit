@@ -51,6 +51,7 @@ Parakit will use the following external tools
 - [vg](https://github.com/vgteam/vg)
 - [samtools](https://samtools.github.io/)
 - [docker](https://docs.docker.com/engine/install/)
+    - Used to run [GraphAligner](https://github.com/maickrau/GraphAligner), [cactus-pangenome](https://github.com/ComparativeGenomicsToolkit/cactus), [pggb](https://github.com/pangenome/pggb) (if they are available, docker won't be used)
 - R with the following packages
     - dplyr
     - ggplot2
@@ -58,9 +59,12 @@ Parakit will use the following external tools
     - RColorBrewer
     - GenomicRanges
     - cowplot
+    - rjson
+    - rmarkdown
 - gunzip
 
-*Soon: a Docker image with all the dependencies.*
+A Docker image is also available with all the dependencies: `quay.io/jmonlong/parakit:1.0.0`. 
+The [`Dockerfile`](Dockerfile) can also give hints how to install all the dependencies.
 
 ## GRCh38+HPRC RCCX pangenome
 
@@ -159,7 +163,6 @@ The reads/haplotypes are split in parts when they loop back in the pangenome.
 
 What we plan on the near future.
 
-- [ ] Prepare (small) Docker image with dependencies.
 - [ ] Take long sequences, e.g. assembled contigs, as input.
 - [ ] Test on Pacbio reads.
 - [ ] Automate pangenome construction on other regions. 

@@ -1,0 +1,10 @@
+{
+    "c1": "chr6:31980532-32013273",
+    "c2": "chr6:32013273-32046127",
+    "flank_size": 300000,
+    "method": "mc",
+    "label": "data/rccx.grch38_hprc.mc",
+    "gene_annot": "data/CYP21A2.gencodev43.nearby_genes.tsv",
+    "clinvar": "data/CYP21A2.pathogenic.variant_summary.2024_09_03.tsv",
+    "genes": ["CYP21A2", "CYP21A1P"]
+}
