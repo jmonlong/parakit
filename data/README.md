@@ -11,11 +11,9 @@ See [rccx.summary.md](rccx.summary.md) for some descriptive metrics on this pang
 
 ## Pangenome construction
 
-Semi-automated approach. 
-
 ### Download HPRC sequence and install AGC
 
-AGC (https://github.com/refresh-bio/agc) will be used to download the sequence of interest during pangenome construction. 
+AGC (https://github.com/refresh-bio/agc) will be used to extract the sequence of interest during pangenome construction. 
 It needs to be installed (easiest is to download a prebuilt binary from the [release page](https://github.com/refresh-bio/agc/releases)).
 
 The AGC file with the HPRC assemblies will also be needed for pangenome construction.
@@ -43,7 +41,44 @@ For example:
 snakemake --cores 8
 ```
 
-### Method 1 - Specifying the region of interest in all input assemblies
+### Method 1 - Specifying the position of each module in all input assemblies
+
+The first method developed.
+
+- Pros
+    - Complete control on what is considered module 1/2
+    - Pangenome is simpler (flat with one loop)
+- Cons
+    - Works only for tandem duplications (no buffer regions handled yet)
+    - Requires trustworthy annotation
+    - More "manual" work
+    - Can't integrate as much sequence as not all sequence are clearly
+
+#### Find position of each module in the HPRC assemblies
+
+Using the downloaded HPRC annotations, the coordinates for the RCCX modules for each assembly were extracted by identifying haplotypes where one gene and one pseudogene were confidently annotated.
+See [extract-rccx-coords.md report](extract-rccx-coords.md) for details.
+It creates the [`hprc.cyp21a.coords.tsv`](hprc.cyp21a.coords.tsv) file.
+It's a TSV with no header containing the coordinate of each module/copy for the HPRC haplotype to extract.
+The three column in the file are: sample name, contig name, label (*c1_\** for a module/copy 1 allele, *c2_\** for a module/copy 2 allele).
+
+#### Config file
+
+Create a config file, see [`rccx.grch38_hprc.mc.config.json`](rccx.grch38_hprc.mc.config.json) file:
+
+```json
+{
+    "ref_fa": "PATH/TO/hg38.fa"
+    "c1": "chr6:31980532-32013273",
+    "c2": "chr6:32013273-32046127",
+    "flank_size": 300000,
+    "method": "mc",
+    "hprc_agc": "HPRC-yr1.agc"
+    "hprc_coords": "hprc.cyp21a.coords.tsv"
+}
+```
+
+### Method 2 - Specifying the region of interest in all input assemblies
 
 Newer method that lets the pangenome builder do the collapse. 
 We guess the modules after building the pangenome
@@ -81,42 +116,6 @@ Short vesion:
 }
 ```
 
-### Method 2 - Specifying the position of each module in all input assemblies
-
-The first method developed.
-
-- Pros
-    - Complete control on what is considered module 1/2
-    - Pangenome is simpler (flat with one loop)
-- Cons
-    - Works only for tandem duplications (no buffer regions handled yet)
-    - Requires trustworthy annotation
-    - More "manual" work
-    - Can't integrate as much sequence as not all sequence are clearly
-
-#### Find position of each module in the HPRC assemblies
-
-Using the downloaded HPRC annotations, the coordinates for the RCCX modules for each assembly were extracted by identifying haplotypes where one gene and one pseudogene were confidently annotated.
-See [extract-rccx-coords.md report](extract-rccx-coords.md) for details.
-It creates the [`hprc.cyp21a.coords.tsv`](hprc.cyp21a.coords.tsv) file.
-It's a TSV with no header containing the coordinate of each module/copy for the HPRC haplotype to extract.
-The three column in the file are: sample name, contig name, label (*c1_\** for a module/copy 1 allele, *c2_\** for a module/copy 2 allele).
-
-#### Config file
-
-Create a config file, see [`rccx.grch38_hprc.mc.config.json`](rccx.grch38_hprc.mc.config.json) file:
-
-```json
-{
-    "ref_fa": "PATH/TO/hg38.fa"
-    "c1": "chr6:31980532-32013273",
-    "c2": "chr6:32013273-32046127",
-    "flank_size": 300000,
-    "method": "mc",
-    "hprc_agc": "HPRC-yr1.agc"
-    "hprc_coords": "hprc.cyp21a.coords.tsv"
-}
-```
 
 ### Run
 
@@ -146,7 +145,7 @@ For now they include:
 
 For example, below are some commands to prepare:
 
-- `CYP21A2.pathogenic.variant_summary.20231127.txt`
+- `CYP21A2.pathogenic.variant_summary.2024_09_03.tsv`
 - `CYP21A2.gencodev43.nearby_genes.tsv`
 
 First download ClinVar variants:
@@ -170,6 +169,9 @@ Adapt the script if you're interested in a different region/gene.
 
 
 ### Building a pangenome for another region
+
+Currently under development. 
+In theory, one would need to:
 
 1. Update the [Snakefile](Snakefile) that downloads HPRC annotation. Change the gene names of interest.
 2. Edit the config JSON with the coordinates of the two new regions of interest (*c1* and *c2* fields).
