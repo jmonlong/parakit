@@ -46,8 +46,10 @@ path.v.shift.reads = .2
 ## how much to vertically shift the points of different classes (for aesthetic purpose)
 path.v.shift.haps = 20
 
-samples = c('LGA80510', 'DEN63290', 'DEN63190', 'DEN63360', 'ARB21022')
-genes.to.show = c('CYP21A1P', 'CYP21A2')
+samples = c('LGA80510', 'DEN63290', 'DEN63190', 'ARB21022')
+samples = c('LGA80510', 'DEN63290', 'DEN63190', 'ARB21022', 'DEN63360')
+genes.to.show = c("C4A", "C4B", "TNXA", "TNXB", "CYP21A2", "CYP21A1P")
+genes.to.show = c("TNXA", "TNXB", 'CYP21A1P', 'CYP21A2')
 
 ## offset for this region
 config = fromJSON(file='../data/rccx.grch38_hprc.mc.config.json')
@@ -305,9 +307,47 @@ if(fig.scale == 'pangenome'){
                                      shape=4, alpha=.7)
 }
 
+ggp$genes2 = g.df %>% filter(type %in% c('exon', 'gene'),
+                             gene_name %in% c('CYP21A1P', 'CYP21A2')) %>% 
+  ggplot(aes(color=module))
+## palette with just 1st/3rd values (module 1/2 in the full palette)
+pal.set1 = brewer.pal(6, 'Set1')[c(1,3)]
+## define the columns to use
+if(fig.scale == 'pangenome'){
+  ggp$genes2 = ggp$genes2 + 
+    geom_segment(aes(x=nstart, xend=nend, y=0, yend=0, linewidth=type)) +
+    xlab('node ID in the pangenome')
+} else {
+  ggp$genes2 = ggp$genes2 + 
+    geom_segment(aes(x=pstart, xend=pend, y=0, yend=0, linewidth=type)) +
+    xlab('position in the chromosome')
+}
+## add the rest of the ggplot elements
+ggp$genes2 = ggp$genes2 + 
+  facet_grid(gene_name~.) +
+  scale_linewidth_manual(values=c(3, 1)) +
+  scale_y_continuous(breaks=0:1) +
+  scale_color_manual(values=pal.set1) + 
+  theme_bw() +
+  guides(color='none') +
+  labs(linewidth=NULL) +
+  ylab('gene\nannotation') + 
+  theme(strip.text.y=element_text(angle=0),
+        axis.text.y=element_blank(), 
+        legend.position=c(.01,.01), legend.justification=c(0,0))
+## add TSS symbol
+if(fig.scale == 'pangenome'){
+  ggp$genes2 = ggp$genes2 + geom_point(aes(x=node, y=0), size=2, data=tss.df,
+                                     shape=4, alpha=.7)
+} else {
+  ggp$genes2 = ggp$genes2 + geom_point(aes(x=pos, y=0), size=2, data=tss.df,
+                                     shape=4, alpha=.7)
+}
+
 ## shortcut to disable x-axis legend (for all panels except the bottom one)
 nox = theme(axis.text.x=element_blank(), axis.title.x=element_blank())
 noleg = guides(alpha='none', color='none', shape='none', linewidth='none')
+nobg = theme(plot.background=element_blank())
 
 ## vertical dotted lines
 vars.snps = vars %>% filter(allele=='alt',
@@ -318,43 +358,70 @@ vars.fus = vars %>% filter(allele=='alt',
 vlines.f = geom_vline(xintercept=vars.fus$node, linetype=4, alpha=.4)
 
 ## define the x-axis zoom
-ggp.xlims = xlim(min(g.df$nstart) - 300, max(g.df$nend) + 300)
+ggp.xlims = xlim(min(g.df$nstart, na.rm=TRUE), max(g.df$nend, na.rm=TRUE))
+xmax2 = g.df %>% filter(gene_name=='CYP21A2') %>% .$nend %>% max
+ggp.xlims2 = xlim(min(g.df$nstart, na.rm=TRUE), xmax2)
+ggp.xlims3 = xlim(min(g.df$nstart, na.rm=TRUE), xmax2 + 200)
 
 names(ggp)
 
 ## put the panels together
 pdf('fig6.raw.pdf', 6, 6)
-
-plot_grid(ggp$reads_LGA80510 + ggp.xlims + nox + noleg,
-          ggp$reads_DEN63290 + ggp.xlims + nox + noleg,
-          ggp$reads_DEN63190 + ggp.xlims + nox + noleg,
-          ggp$reads_DEN63360 + ggp.xlims + nox + noleg,
-          ggp$reads_ARB21022 + ggp.xlims + nox + noleg,
-          ggp$genes + ggp.xlims + noleg,
-          ncol=1, align='v')
-
-plot_grid(ggp$hap_LGA80510 + ggp.xlims + nox + noleg,
-          ggp$hap_DEN63290 + ggp.xlims + nox + noleg,
-          ggp$hap_DEN63190 + ggp.xlims + nox + noleg,
-          ggp$hap_DEN63360 + ggp.xlims + nox + noleg,
-          ggp$hap_ARB21022 + ggp.xlims + nox + noleg,
-          ggp$genes + ggp.xlims + noleg,
-          ncol=1, align='v')
-
-plot_grid(ggp$as_LGA80510 + ggp.xlims + nox + noleg,
-          ggp$as_DEN63290 + ggp.xlims + nox + noleg,
-          ggp$as_DEN63190 + ggp.xlims + nox + noleg,
-          ggp$as_DEN63360 + ggp.xlims + nox + noleg,
-          ggp$as_ARB21022 + ggp.xlims + nox + noleg,
-          ggp$genes + ggp.xlims + noleg,
-          ncol=1, align='v')
-
+plot_grid(ggp$reads_LGA80510 + ggp.xlims + nox + noleg + nobg,
+          ggp$reads_DEN63290 + ggp.xlims + nox + noleg + nobg,
+          ggp$reads_DEN63190 + ggp.xlims + nox + noleg + nobg,
+          ggp$reads_ARB21022 + ggp.xlims + nox + noleg + nobg,
+          ggp$genes + ggp.xlims + noleg + nobg,
+          ncol=1, align='v', rel_heights=c(2,2,2,2,3))
+plot_grid(ggp$hap_LGA80510 + ggp.xlims + nox + noleg + nobg,
+          ggp$hap_DEN63290 + ggp.xlims + nox + noleg + nobg,
+          ggp$hap_DEN63190 + ggp.xlims + nox + noleg + nobg,
+          ggp$hap_ARB21022 + ggp.xlims + nox + noleg + nobg,
+          ggp$genes + ggp.xlims + noleg + nobg,
+          ncol=1, align='v', rel_heights=c(2,2,2,2,3))
+plot_grid(ggp$as_LGA80510 + ggp.xlims + nox + noleg + nobg,
+          ggp$as_DEN63290 + ggp.xlims + nox + noleg + nobg,
+          ggp$as_DEN63190 + ggp.xlims + nox + noleg + nobg,
+          ggp$as_ARB21022 + ggp.xlims + nox + noleg + nobg,
+          ggp$genes + ggp.xlims + noleg + nobg,
+          ncol=1, align='v', rel_heights=c(2,2,2,2,3))
 dev.off()
 
+nopanel = theme(strip.text.y=element_blank())
 
+pdf('fig6.b.pdf', 12, 4)
+plot_grid(ggp$as_LGA80510 + ggp.xlims2 + nox + noleg + nobg + nopanel,
+          ggp$as_DEN63290 + ggp.xlims2 + nox + noleg + nobg + nopanel,
+          ggp$as_DEN63190 + ggp.xlims + nox + noleg + nobg + nopanel,
+          ggp$as_ARB21022 + ggp.xlims3 + nox + noleg + nobg + nopanel,
+          ggp$as_DEN63360 + ggp.xlims2 + nox + noleg + nobg + nopanel,
+          ggp$hap_LGA80510 + ggp.xlims2 + nox + noleg + nobg,
+          ggp$hap_DEN63290 + ggp.xlims2 + nox + noleg + nobg,
+          ggp$hap_DEN63190 + ggp.xlims + nox + noleg + nobg,
+          ggp$hap_ARB21022 + ggp.xlims3 + nox + noleg + nobg,
+          ggp$hap_DEN63360 + ggp.xlims2 + nox + noleg + nobg,
+          ggp$genes2 + ggp.xlims2 + noleg + nobg + nopanel,
+          ggp$genes2 + ggp.xlims2 + noleg + nobg + nopanel,
+          ggp$genes + ggp.xlims + noleg + nobg + nopanel,
+          ggp$genes2 + ggp.xlims3 + noleg + nobg + nopanel,
+          ggp$genes2 + ggp.xlims2 + noleg + nobg + nopanel,
+          ncol=5, align='v', rel_heights=c(2,2,2))
+dev.off()
+
+ggp.xlims = xlim(0, max(ninfo$node))
+
+pdf('fig6.a.pdf', 9, 5)
+plot_grid(ggp$reads_LGA80510 + ggp.xlims + nox + noleg + nobg,
+          ggp$reads_DEN63290 + ggp.xlims + nox + noleg + nobg,
+          ggp$reads_DEN63190 + ggp.xlims + nox + noleg + nobg,
+          ggp$reads_ARB21022 + ggp.xlims + nox + noleg + nobg,
+          ggp$genes + ggp.xlims + noleg + nobg,
+          ncol=1, align='v', rel_heights=c(1.4,1.2,1.2,.8,3))
+dev.off()
 
 ## misc old
 
+if(FALSE){
   ## vertical dotted line to help following the variants called
   var.vl = geom_vline(xintercept=unique(ggp.vars.pts$node), linetype=3, linewidth=.3)
   if(fig.scale == 'genome') {
@@ -362,21 +429,22 @@ dev.off()
   }
 
 
-## allele support
-reads.counts = reads.df %>% arrange(node) %>%
-  group_by(read) %>% filter(n()>700) %>% 
-  filter(class %in% c('c1', 'c2'), sample=='DEN63360') %>% 
-  group_by(rnode) %>% 
-  summarize(site=ifelse(any('c1' %in% class), 'c1', NA),
-            site=ifelse(any('c2' %in% class), 'c2', site),
-            site=ifelse(all(c('c1', 'c2') %in% class), 'c1c2', site),
-            c2.prop=mean(class=='c2'),
-            c1.prop=mean(class=='c1'),
-            c2.prop.adj=ifelse(c2.prop==0, 1-c1.prop, c2.prop),
-            pos=pos[1], nnode=length(unique(node)), node=node[1], depth=n()) %>%
-  filter(!is.na(site), site=='c1c2')
+  ## allele support
+  reads.counts = reads.df %>% arrange(node) %>%
+    group_by(read) %>% filter(n()>700) %>% 
+    filter(class %in% c('c1', 'c2'), sample=='DEN63360') %>% 
+    group_by(rnode) %>% 
+    summarize(site=ifelse(any('c1' %in% class), 'c1', NA),
+              site=ifelse(any('c2' %in% class), 'c2', site),
+              site=ifelse(all(c('c1', 'c2') %in% class), 'c1c2', site),
+              c2.prop=mean(class=='c2'),
+              c1.prop=mean(class=='c1'),
+              c2.prop.adj=ifelse(c2.prop==0, 1-c1.prop, c2.prop),
+              pos=pos[1], nnode=length(unique(node)), node=node[1], depth=n()) %>%
+    filter(!is.na(site), site=='c1c2')
 
-ggplot(reads.counts, aes(x=c2.prop, fill=factor(nnode))) + geom_histogram() +
-  geom_vline(xintercept=c(2/5, 3/5))
+  ggplot(reads.counts, aes(x=c2.prop, fill=factor(nnode))) + geom_histogram() +
+    geom_vline(xintercept=c(2/5, 3/5))
 
-ggplot(reads.counts, aes(x=depth, y=c2.prop)) + geom_point() + xlim(0,100)
+  ggplot(reads.counts, aes(x=depth, y=c2.prop)) + geom_point() + xlim(0,100)
+}
