@@ -46,14 +46,14 @@ pars_call.set_defaults(scmd='call')
 
 # diplotype subcommand: find the best pair of paths by aggregating read support
 pars_diplotype = spars.add_parser('diplotype',
-                              help='find diplotype best supported by reads')
+                                  help='find diplotype best supported by reads')
 pars_diplotype.add_argument('-j', help='config JSON file', default='')
 pars_diplotype.add_argument('-n', help='node information', default='')
 pars_diplotype.add_argument('-g', help='input GFA pangenome', default='')
 pars_diplotype.add_argument('-r', help='input alignments in GAF', required=True)
 pars_diplotype.add_argument('-o', help='output TSV prefix', required=True)
 pars_diplotype.add_argument('-c', default=3, type=float,
-                        help='minimum read support for subread clustering.')
+                            help='minimum read support for subread clustering.')
 pars_diplotype.set_defaults(scmd='diplotype')
 
 # annotate subcommand: annotate sequence(s) from a FASTA file

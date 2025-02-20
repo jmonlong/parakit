@@ -4,7 +4,7 @@
 
 Parakit is a tool to analyze the [RCCX module](https://en.wikipedia.org/wiki/RCCX), which contain the CYP21A2 gene, using long sequencing reads. 
 A first version was used to analyze ONT R10 data and made use of 65 high-quality assemblies from the [Human Pangenome Reference Consortium](https://humanpangenome.org/). 
-This version is described and benchmarked in [Monlong et al. medRxiv 2025](https://www.medrxiv.org/), and more information can be found in the [`paper`](paper) directory.
+This version is described and benchmarked in [Monlong et al. medRxiv 2025](https://www.medrxiv.org/content/10.1101/2025.02.07.25321404v1), and more information can be found in the [`paper`](paper) directory.
 It is still in active development, especially to extend this approach to other loci and keep improving the resolution (new features, larger pangenome, other sequencing technologies).
 
 - [Installation](#installation)
@@ -158,6 +158,12 @@ This means that the x-axis is not exactly to scale with the genome sequence.
 For the reads and diplotype panels, points are colored to highlight informative nodes (specific to module 1 in red or 2 in green).
 Informative nodes/points are slightly shifted to help distinguish them.
 The reads/haplotypes are split in parts when they loop back in the pangenome.
+
+## Citation
+
+For now, please cite [our preprint on medRxiv](https://www.medrxiv.org/content/10.1101/2025.02.07.25321404v1):
+
+> Long-read sequencing resolves the clinically relevant CYP21A2 locus, supporting a new clinical test for Congenital Adrenal Hyperplasia. Jean Monlong, Xiao Chen, Hayk Barseghyan, William J Rowell, Shloka Negi, Natalie Nokoff, Lauren Mohnach, Josephine Hirsch, Courtney Finlayson, Catherine E. Keegan, Miguel Almalvez, Seth I. Berger, Ivan de Dios, Brandy McNulty, Alex Robertson, Karen H. Miga, Phyllis W. Speiser, Benedict Paten, Eric Vilain, Emmanuèle C. Délot. medRxiv 2025.02.07.25321404; doi: https://doi.org/10.1101/2025.02.07.25321404 
 
 ## Next
 

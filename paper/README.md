@@ -1,3 +1,5 @@
+Information about the methods and analysis for our manuscript [currently on medRxiv](https://www.medrxiv.org/content/10.1101/2025.02.07.25321404v1).
+
 # Data and figures
 
 Data to reproduce the figures is available in the [`data`](data) directory.
