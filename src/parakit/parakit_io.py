@@ -4,10 +4,12 @@ import parakit.parakit_class as pkc
 import os
 
 
-def readNodeInfo(filen, verbose=True):
+def readNodeInfo(filen, verbose=False):
     if verbose:
         print('Reading ' + filen + '...')
     nodes = {}
+    node_sum = {}
+    cyc_nodes = ['', '']
     with open(filen, 'rt') as inf:
         heads = next(inf).rstrip().split('\t')
         for line in inf:
@@ -20,8 +22,23 @@ def readNodeInfo(filen, verbose=True):
             nodes[noden]['ref'] = int(line[heads.index('ref')])
             nodes[noden]['rpos_min'] = int(line[heads.index('rpos_min')])
             nodes[noden]['rpos_max'] = int(line[heads.index('rpos_max')])
-            nodes[noden]['class'] = line[heads.index('class')]
+            node_class = line[heads.index('class')]
+            nodes[noden]['class'] = node_class
             nodes[noden]['seq'] = line[heads.index('seq')]
+            # tally the number of nodes in each class (for verbose mode)
+            if node_class not in node_sum:
+                node_sum[node_class] = 0
+            node_sum[node_class] += 1
+            # and cycling nodes
+            if node_class == 'cyc_l':
+                cyc_nodes[1] = noden
+            if node_class == 'cyc_r':
+                cyc_nodes[0] = noden
+    if verbose:
+        vout = ['cycle: ' + '-'.join(cyc_nodes)]
+        for nc in node_sum:
+            vout.append('{}: {}'.format(nc, node_sum[nc]))
+        print('\t' + ', '.join(vout))
     return nodes
 
 
@@ -56,7 +73,7 @@ def parsePath(path):
 
 
 # 'nodes' is used to know the node size
-def readGAF(filen, nodes, verbose=True):
+def readGAF(filen, nodes, verbose=False):
     if verbose:
         print('Reading ' + filen + '...')
     # list cycling nodes
@@ -73,6 +90,9 @@ def readGAF(filen, nodes, verbose=True):
     # rpos = {}
     supp_aln_cpt = {}
     reads_tr = pkc.Reads()
+    nflipped = 0
+    nsupp_aln = 0
+    nunmp = 0
     for line in inf_gaf:
         line = line.rstrip().split('\t')
         # if read was seen before, skip supp aln
@@ -80,6 +100,7 @@ def readGAF(filen, nodes, verbose=True):
         if reads_tr.hasRead(readn):
             supp_aln_cpt[readn] += 1
             readn = '{}_sa{}'.format(readn, supp_aln_cpt[readn])
+            nsupp_aln += 1
             continue
         else:
             supp_aln_cpt[readn] = 0
@@ -91,6 +112,9 @@ def readGAF(filen, nodes, verbose=True):
             if tag[0] == 'cg':
                 cg = tag[2]
                 break
+        if cg == '':
+            nunmp += 1
+            continue
         # parse CIGAR string
         n_idx = 0
         node_pos = int(line[7])
@@ -136,6 +160,7 @@ def readGAF(filen, nodes, verbose=True):
             path_node_endpos.append(nsize - cur_endpos)
         # flip read if mostly traversing in reverse
         if line[5].count('>') < line[5].count('<'):
+            nflipped += 1
             path_cov.reverse()
             path_read_pos.reverse()
             path_node_startpos.reverse()
@@ -150,11 +175,17 @@ def readGAF(filen, nodes, verbose=True):
                          endpos=path_node_endpos,
                          readpos=path_read_pos)
     inf_gaf.close()
+    if verbose:
+        print('\t{} reads parsed.'.format(reads_tr.nReads()))
+        print('\t{} reads were flipped to traverse the '
+              'pangenome (mostly) forward.'.format(nflipped))
+        print('\t{} supplementary alignment were filtered.'.format(nsupp_aln))
+        print('\t{} unmapped reads.'.format(nunmp))
     return (reads_tr)
 
 
 # 'nodes' is used to know the node size
-def readGFAasReads(filen, nodes, verbose=True):
+def readGFAasReads(filen, nodes, verbose=False):
     if verbose:
         print('Reading ' + filen + '...')
     inf_gfa = open(filen, 'rt')
@@ -186,7 +217,7 @@ def readGFAasReads(filen, nodes, verbose=True):
     return (reads_tr)
 
 
-def updateNodesSucsWithGFA(nodes, filen, verbose=True):
+def updateNodesSucsWithGFA(nodes, filen, verbose=False):
     if verbose:
         print('Reading ' + filen + '...')
     # read GFA and update edges
@@ -201,7 +232,8 @@ def updateNodesSucsWithGFA(nodes, filen, verbose=True):
     # init sucs for all nodes
     for nod in nodes:
         if 'sucs' not in nodes[nod]:
-            print('adding sucs to ', nod)
+            if verbose:
+                print('\tAdding new successor to node ', nod)
             nodes[nod]['sucs'] = {}
     inf.close()
 

@@ -188,6 +188,9 @@ class Reads:
             return ([])
         return (self.path[read_name])
 
+    def nReads(self):
+        return (len(self.path))
+    
     def hasRead(self, read_name):
         return (read_name in self.path)
 
@@ -600,7 +603,8 @@ class Subreads:
             cons_path.append(cnod)
         return (cons_path)
 
-    def enumerateAlleles(self, cluster_list, max_cycles=3, min_read_support=3):
+    def enumerateAlleles(self, cluster_list, max_cycles=3, min_read_support=3,
+                         verbose=False):
         # make a consensus path for each cluster
         cl_paths = []
         for cl in cluster_list:
@@ -674,6 +678,10 @@ class Subreads:
             else:
                 if path[0] == 'flankl' and path[-1] == 'flankr':
                     final_paths.append(path)
+            if verbose and len(cur_paths) % 5000 == 0 and len(cur_paths) > 0:
+                print('\t\tWatchdog: {} haplotype candidate in '
+                      'progress ({} finished).'.format(len(cur_paths),
+                                                       len(final_paths)))
         # enumerate (node) paths
         final_paths_n = {}
         for path in final_paths:

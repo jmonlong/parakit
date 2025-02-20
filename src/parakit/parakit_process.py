@@ -130,7 +130,7 @@ def constructPgMc(config, opref, pg_gfa):
     if not os.path.isfile(mc_outdir_fn + '/mc_pg.gfa'):
         subprocess.run(['gunzip', mc_outdir_fn + '/mc_pg.gfa.gz'],
                        check=True)
-    # check if cactus-minigraph is installed
+    # check if GraphAligner is installed
     ga_cmd = ['GraphAligner', '-g', mc_outdir_fn + '/mc_pg.gfa',
               '-f', 'seqs/ref_full.fa', '-a', mc_outdir_fn + '/ref.gaf',
               '-x', 'vg']
@@ -300,7 +300,7 @@ def constructPgPggb(config, opref, pg_gfa, threads=1):
                                                                  len(fa_files),
                                                                  threads))
     pggb_sh_f.close()
-    # check if cactus-minigraph is installed
+    # check if pggb is installed
     if toolAvailable('pggb') and toolAvailable('samtools'):
         pggb_cmd = ['sh', pggb_sh_fn]
     elif toolAvailable('docker'):
@@ -357,8 +357,8 @@ def mapReads(in_fq, pg_gfa, out_gaf):
         # if we want an gzipped output, make a temporary GAF
         # that will be zipped later
         ga_gaf = out_gaf + '.gaf'
-    # check if cactus-minigraph is installed
-    if toolAvailable('cactus-pangenome'):
+    # check if GraphAligner is installed
+    if toolAvailable('GraphAligner'):
         ga_cmd = ['GraphAligner', '-g', pg_gfa, '-f', in_fq, '-a', ga_gaf,
                   '-x', 'vg', '-b', '100']
     elif toolAvailable('docker'):

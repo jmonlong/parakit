@@ -4,6 +4,8 @@ import math
 
 
 def findPaths(nodes, reads, args):
+    if args.t:
+        print("Enumerating candidate haplotypes..")
     # upate nodes with read info
     for readn in reads.path:
         path = reads.path[readn]
@@ -19,14 +21,19 @@ def findPaths(nodes, reads, args):
     if args.c == 0:
         print('Error: minimum read support -c must be greater than 0')
         exit(1)
+    if args.t:
+        print("\tMinimum read support: {}".format(args.c))
     # enumerate path candidates by clustering (sub)reads
-    paths = clusterSubreads(nodes, reads, min_read_support=args.c)
+    paths = clusterSubreads(nodes, reads, min_read_support=args.c,
+                            verbose=args.t)
     # if too many paths, rerun with more stringent read support
     while len(paths) > 500:
         args.c += 1
-        print("Too many paths ({}). Rerunning with min read support: "
-              "{}".format(len(paths), args.c))
-        paths = clusterSubreads(nodes, reads, min_read_support=args.c)
+        if args.t:
+            print("\tToo many paths ({}). Rerunning with min read support: "
+                  "{}".format(len(paths), args.c))
+        paths = clusterSubreads(nodes, reads, min_read_support=args.c,
+                                verbose=args.t)
 
     # potentially first select the best paths (in case there are too
     # many paths and we don't want to consider all pairs)
@@ -34,9 +41,12 @@ def findPaths(nodes, reads, args):
     best_paths = list(paths.keys())
 
     # evaluate pairs of path
-    print('Evaluate quality of pairs of the ' +
-          str(len(best_paths)) + ' best paths...')
+    if args.t:
+        print('Evaluating quality of diplotypes from the ' +
+              str(len(best_paths)) + ' best haplotypes...')
     # precompute alignment stats for each path first
+    if args.t:
+        print('\tPrecomputing alignment of reads to each haplotype...')
     aln_score = {}
     for mii in range(len(best_paths)):
         pathn = best_paths[mii]
@@ -46,6 +56,8 @@ def findPaths(nodes, reads, args):
     longest_reads = sorted(list(reads.path.keys()),
                            key=lambda k: -len(reads.path[k]))
     # precompute read coverage on each node
+    if args.t:
+        print('\tPrecomputing node coverage for reads and haplotypes...')
     read_cov = {}
     for nod in nodes:
         readc = 0
@@ -62,6 +74,8 @@ def findPaths(nodes, reads, args):
             else:
                 path_cov[pathn][nod] += 1
     # evaluate each pair
+    if args.t:
+        print('\tEvaluating each haplotype pair...')
     escores = []
     # keep track of some min/max values to adjust scores later
     max_cor = 0
@@ -97,10 +111,13 @@ def findPaths(nodes, reads, args):
     return ({'escores': escores_r, 'paths': paths})
 
 
-def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3):
+def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3,
+                    verbose=False):
     # init subreads
     sreads = pkc.Subreads()
     sreads.splitReads(reads, nodes)
+    if verbose:
+        print('\t\tClustering subreads...')
     # init list of subreads clusters
     sreads_list = [sreads]
     sreads_list_final = []
@@ -121,9 +138,17 @@ def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3):
             sreads_list.append(csreads.subsetByCluster(0))
             sreads_list.append(csreads.subsetByCluster(1))
         # iterate until no clear markers suggesting two alleles
+        if verbose and len(sreads_list) % 50 == 0 and len(sreads_list) > 0:
+            print('\t\tWatchdog: {} clusters in '
+                  'progress ({} finished).'.format(len(sreads_list),
+                                                   len(sreads_list_final)))
     # enumerate alleles
+    if verbose:
+        print('\t\tEnumerating haplotypes from {} '
+              'clusters...'.format(len(sreads_list_final)))
     res = sreads.enumerateAlleles(sreads_list_final, max_cycles=4,
-                                  min_read_support=min_read_support)
+                                  min_read_support=min_read_support,
+                                  verbose=verbose)
     return (res)
 
 

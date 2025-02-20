@@ -42,6 +42,7 @@ pars_call.add_argument('-a', help='annotation file (e.g. from ClinVar)',
 pars_call.add_argument('-m', help='number of markers checked around the SNPs',
                        default=20, type=int)
 pars_call.add_argument('-o', help='output TSV', required=True)
+pars_call.add_argument('-t', help='debug trace mode', action='store_true')
 pars_call.set_defaults(scmd='call')
 
 # diplotype subcommand: find the best pair of paths by aggregating read support
@@ -54,6 +55,7 @@ pars_diplotype.add_argument('-r', help='input alignments in GAF', required=True)
 pars_diplotype.add_argument('-o', help='output TSV prefix', required=True)
 pars_diplotype.add_argument('-c', default=3, type=float,
                             help='minimum read support for subread clustering.')
+pars_diplotype.add_argument('-t', help='debug trace mode', action='store_true')
 pars_diplotype.set_defaults(scmd='diplotype')
 
 # annotate subcommand: annotate sequence(s) from a FASTA file
@@ -161,18 +163,18 @@ def scmd_call(args):
 
     # load node info
     node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
-    nodes = pkio.readNodeInfo(node_fn)
+    nodes = pkio.readNodeInfo(node_fn, verbose=args.t)
 
     # update with edge information
     pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
-    pkio.updateNodesSucsWithGFA(nodes, pg_gfa)
+    pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=args.t)
 
     # read annotation
     clinvar_fn = pkio.clinvarFile(args.a, config, check_file=True)
     vedges = pkio.readVariantAnnotation(clinvar_fn, nodes, pos_offset)
 
     # read GAF
-    reads = pkio.readGAF(args.r, nodes)
+    reads = pkio.readGAF(args.r, nodes, verbose=args.t)
 
     # find variants in reads and write output TSV
     pkvar.findVariants(nodes, vedges, reads,
@@ -189,14 +191,14 @@ def scmd_diplotype(args):
 
     # load node info
     node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
-    nodes = pkio.readNodeInfo(node_fn)
+    nodes = pkio.readNodeInfo(node_fn, verbose=args.t)
 
     # update with edge information
     pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
-    pkio.updateNodesSucsWithGFA(nodes, pg_gfa)
+    pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=args.t)
 
     # read GAF
-    reads = pkio.readGAF(args.r, nodes)
+    reads = pkio.readGAF(args.r, nodes, verbose=args.t)
 
     # find paths
     paths_res = pkpath.findPaths(nodes, reads, args)

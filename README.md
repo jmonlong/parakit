@@ -12,6 +12,7 @@ It is still in active development, especially to extend this approach to other l
 - [Commands](#commands)
 - [Output](#output)
 - [Citation](#citation)
+- [FAQ](#FAQ)
 
 Starting from an indexed BAM file, reads in the RCCX region are extracted and realigned to a local pangenome were both modules are collapsed.
 Parakit then looks for pathogenic variants supported by multiple types of signal: read coverage, allele support, read support, diplotype reconstruction. 
@@ -164,6 +165,19 @@ The reads/haplotypes are split in parts when they loop back in the pangenome.
 For now, please cite [our preprint on medRxiv](https://www.medrxiv.org/content/10.1101/2025.02.07.25321404v1):
 
 > Long-read sequencing resolves the clinically relevant CYP21A2 locus, supporting a new clinical test for Congenital Adrenal Hyperplasia. Jean Monlong, Xiao Chen, Hayk Barseghyan, William J Rowell, Shloka Negi, Natalie Nokoff, Lauren Mohnach, Josephine Hirsch, Courtney Finlayson, Catherine E. Keegan, Miguel Almalvez, Seth I. Berger, Ivan de Dios, Brandy McNulty, Alex Robertson, Karen H. Miga, Phyllis W. Speiser, Benedict Paten, Eric Vilain, Emmanuèle C. Délot. medRxiv 2025.02.07.25321404; doi: https://doi.org/10.1101/2025.02.07.25321404 
+
+# FAQ
+
+### I tried running Parakit and found a bug/issue. What should I do?
+
+If it looks like it's an issue with external tools used by Parakit (GraphAligner, samtools, Minigraph-Cactus), make sure they are properly installed or, if using Docker, that docker is properly installed.
+Another test could be to try running the `parakit` within the docker container that we've prepared: `quay.io/jmonlong/parakit:1.0.0`.
+If that doesn't work, please post an [Issue](https://github.com/jmonlong/parakit/issues).
+
+If the error looks like a Python error, you can try to rerun the command with a more verbose output.
+Some commands can take a `-t` arguments to toggle a "debug trace" mode, which might give you more information about what Parakit is doing. 
+Run `parakit COMMAND -h` to list options and check if there is a "debug trace mode" option.
+Then, please post an [Issue](https://github.com/jmonlong/parakit/issues), pasting the output with this `-t` option.
 
 ## Next
 
