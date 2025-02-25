@@ -171,6 +171,26 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
             if c2_n / nmarkers > .5 and c1_n / nmarkers < .5 and \
                nodes[marks_n[ii]]['rpos_min'] > min_pos_var:
                 cand_func_reads[readn] = True
+            # same but the other way around
+            c1_n = marks_c[(ii-nmarkers+1):(ii+1)].count('c2')
+            c2_n = marks_c[(ii+1):(ii+nmarkers+1)].count('c1')
+            score = min(c2_n / nmarkers, c1_n / nmarkers)
+            # save any position over the minimum score threshold
+            if score > .8:
+                # save info about the breakpoint
+                fus_info = {'node_l': marks_n[ii],
+                            'pos_l_1': marks_p1[ii],
+                            'pos_l_2': marks_p2[ii],
+                            'node_u': marks_n[ii+1],
+                            'pos_u_1': marks_p1[ii+1],
+                            'pos_u_2': marks_p2[ii+1],
+                            'readn': readn}
+                if marks_n[ii] not in fus_reads:
+                    fus_reads[marks_n[ii]] = []
+                fus_reads[marks_n[ii]].append(fus_info)
+            if c2_n / nmarkers > .5 and c1_n / nmarkers < .5 and \
+               nodes[marks_n[ii]]['rpos_min'] > min_pos_var:
+                cand_func_reads[readn] = True
     # filter candidate fusions
     # keep nodes in range and one per read
     # (starting with the ones supported by the most reads)

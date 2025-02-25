@@ -184,6 +184,52 @@ def readGAF(filen, nodes, verbose=False):
     return (reads_tr)
 
 
+def readGAFstats(filen, nodes):
+    # find flanking reference nodes (to filter reads only touching those)
+    flank_nodes = []
+    for nod in nodes:
+        if nodes[nod]['class'] == 'ref':
+            flank_nodes.append(nod)
+    # prepare result object
+    res = {'read': [], 'length': [], 'aligned': [], 'matches': [],
+           'dv': [], 'id': []}
+    # guess if input file is gzipped
+    if filen.endswith('.gz'):
+        inf_gaf = gzip.open(filen, 'rt')
+    else:
+        inf_gaf = open(filen, 'rt')
+    for line in inf_gaf:
+        line = line.rstrip().split('\t')
+        # parse path and filter if only touching flanks
+        path = parsePath(line[5])
+        keep_read = False
+        for node_orient in path:
+            if node_orient[0] not in flank_nodes:
+                # at least one touched node is not a flanking region
+                keep_read = True
+                break
+        if not keep_read:
+            continue
+        # if read was seen before, skip supp aln
+        res['read'].append(line[0])
+        res['length'].append(int(line[1]))
+        # alignment info
+        res['aligned'].append(int(line[10]))
+        res['matches'].append(int(line[9]))
+        # find dv and/or id fields
+        f_dv = 'NA'
+        f_id = 'NA'
+        for tag in line[12:]:
+            tag = tag.split(':')
+            if tag[0] == 'dv':
+                f_dv = tag[2]
+            elif tag[0] == 'id':
+                f_id = tag[2]
+        res['id'].append(f_id)
+        res['dv'].append(f_dv)
+    return (res)
+
+
 # 'nodes' is used to know the node size
 def readGFAasReads(filen, nodes, verbose=False):
     if verbose:

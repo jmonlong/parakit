@@ -1,4 +1,5 @@
 import argparse
+import statistics
 import parakit.parakit_io as pkio
 import parakit.parakit_process as pkproc
 import parakit.parakit_variants as pkvar
@@ -106,6 +107,15 @@ pars_copy.add_argument('-j', help='config JSON file', required=True)
 pars_copy.add_argument('-n', help='node information', default='')
 pars_copy.add_argument('-r', default='', help='input alignments in GAF')
 pars_copy.set_defaults(scmd='copy')
+
+# gafstats subcommand: estimate the copy number of the modules
+pars_gafstats = spars.add_parser('gafstats',
+                                 help='compute basis stats from a GAF')
+pars_gafstats.add_argument('-r', required=True, help='input alignments in GAF')
+pars_gafstats.add_argument('-j', help='config JSON file', required=True)
+pars_gafstats.add_argument('-n', help='node information', default='')
+pars_gafstats.add_argument('-o', help='Optional output TSV file', default='')
+pars_gafstats.set_defaults(scmd='gafstats')
 
 
 def scmd_construct(args):
@@ -269,6 +279,41 @@ def scmd_copy(args):
     return (True)
 
 
+def scmd_gafstats(args):
+    # read config json file
+    config = json.load(open(args.j, 'rt'))
+    # update/guess paths before
+    # load node info
+    node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
+    nodes = pkio.readNodeInfo(node_fn)
+    # read GAF
+    stats = pkio.readGAFstats(args.r, nodes)
+    # print summary stats
+    median_rlen = statistics.median(stats['length'])
+    print('Median read length: {} bp'.format(median_rlen))
+    prop_aln = []
+    prop_match = []
+    for ii in range(len(stats['length'])):
+        prop_aln.append(float(stats['aligned'][ii]) / stats['length'][ii])
+        prop_match.append(float(stats['matches'][ii]) / stats['length'][ii])
+    prop_aln = round(100 * statistics.median(prop_aln), 2)
+    print('Alignment blocks are ~{}% of the read length '
+          '(median)'.format(prop_aln))
+    prop_match = round(100 * statistics.median(prop_match), 2)
+    print('Median ~{}% of a read matches the pangenome'.format(prop_match))
+    # write output TSV if output file provided
+    if args.o != '':
+        outf = open(args.o, 'wt')
+        outf.write('\t'.join(list(stats.keys())) + '\n')
+        for ii in range(len(stats['length'])):
+            rec = []
+            for metric in list(stats.keys()):
+                rec.append(str(stats[metric][ii]))
+            outf.write('\t'.join(rec) + '\n')
+        outf.close()
+    return (True)
+
+
 def main():
     args = pars.parse_args()
 
@@ -284,5 +329,7 @@ def main():
         scmd_viz(args)
     elif args.scmd == 'copy':
         scmd_copy(args)
+    elif args.scmd == 'gafstats':
+        scmd_gafstats(args)
     elif args.scmd == 'annotate':
         scmd_annotate(args)
