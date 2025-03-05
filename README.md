@@ -104,7 +104,7 @@ parakit call -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o calls.tsv
 
 The reads/calls are saved in `calls.tsv`.
 
-To list and evaluate candidate diplotype
+To list and evaluate candidate diplotype:
 
 ```bash
 parakit diplotype -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o diplotype
@@ -114,6 +114,10 @@ This command creates two files
 
 - `diplotype.paths-stats.tsv` with the diplotypes ranked by score (based on read alignment and coverage).
 - `diplotype.paths-info.tsv` with the path taken by each haplotype through the pangenome.
+
+Of note, the diplotype inference is the module most sensitive to the input reads. 
+It might not always work, especially if reads are shorter.
+If you notice inconsistencies, believe the calls from the raw reads and aggregated coverage/allele support.
 
 Finally, the visualization command makes a figure. 
 The *all* mode, will make a multi-panel figure summarizing all analysis.
@@ -179,10 +183,43 @@ Some commands can take a `-t` arguments to toggle a "debug trace" mode, which mi
 Run `parakit COMMAND -h` to list options and check if there is a "debug trace mode" option.
 Then, please post an [Issue](https://github.com/jmonlong/parakit/issues), pasting the output with this `-t` option.
 
+### The diplotype output is inconsistent with the other predictions. Who's right?
+
+When in doubt, believe the calls made directly from the reads (`call` subcommand), and the change in allele ratio (*allele_support* mode for the `viz` subcommand). 
+The current diplotyping approach seems to work for samples in our study (~30x WGS of 30kb N50 reads with R10), but if reads are shorter or noisier the predicted diplotypes will most likely be incorrect. 
+If your reads tend to be shorter than 30kb, take the diplotyping predictions with a grain of salt and focus on the other analysis to understand the composition of the RCCX module in the sample.
+
+A more stable approach is under development using an EM algorithm that should convergence to good predictions across a wider range of input data. 
+
+### How can I be sure that there is no functional CYP21A2 copy?
+
+Two main recommendations:
+
+First, the coverage and allele support graph can suggest the number of copies for each module.
+Combined with the calls found in the reads, one can have a first idea if all the CYP21A2 copies are accounted for by the pathogenic variants called.
+For example, if there is evidence for at least one CYP21A2 copy and no variants were identified in the reads, there is likely a functional copy.
+If, like [in the example above](#output), the coverage and allele support suggest two CYP21A2 copies, and two mutually exclusive variants were found in the reads, there is no functional CYP21A2 copy.
+
+Second, look at the graph made by `viz` with the *calls* mode. 
+It will include reads that might support a functional CYP21A2 copy. 
+These are reads that cover the variants identified but support the reference allele.
+To make that figure, run something like:
+
+```sh
+parakit viz -v calls -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -c calls.tsv -o parakit.calls.pdf
+```
+
+Note: to get quick stats about the reads aligning to the pangenome, run
+
+```sh
+parakit gafstats -r reads.gaf.gz -j rccx.grch38_hprc.mc.config.json
+```
+
 ## Next
 
 What we plan on the near future.
 
+- [ ] Implement more robust diplotyping and add some information about our confidence in them
 - [ ] Take long sequences, e.g. assembled contigs, as input.
 - [ ] Test on Pacbio reads.
 - [ ] Automate pangenome construction on other regions. 
