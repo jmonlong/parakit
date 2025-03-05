@@ -346,7 +346,7 @@ class Subreads:
         # (useful if not covered with current subread subset)
         self.ecov_prev = {}
         # saves the node markers where subreads differ to use for clustering
-        self.markers = []
+        self.markers = {}
         # saves the bi-partition for each subread
         self.sparts = {}
 
@@ -493,7 +493,7 @@ class Subreads:
                 self.ecov[nod][nnod] += 1
 
     def findMarkers(self, min_read_support=3):
-        self.markers = []
+        self.markers = {}
         # start from within the collapsed part of the pangenome
         cnod = self.cyc_edge[1]
         while cnod != self.cyc_edge[0]:
@@ -514,6 +514,7 @@ class Subreads:
                 self.ecov[cnod][best_nnod] = best_supp
             # check support for each outgoing edge
             nsupp = []
+            rsupp = []
             best_nnod = ''
             best_supp = 0
             for nnod in self.ecov[cnod]:
@@ -522,14 +523,33 @@ class Subreads:
                     best_supp = self.ecov[cnod][nnod]
                 if self.ecov[cnod][nnod] >= min_read_support:
                     nsupp.append(nnod)
+                    rsupp.append(self.ecov[cnod][nnod])
             # save those nodes as markers if more than one supported edge
             if len(nsupp) > 1:
-                self.markers.extend(nsupp)
+                rsupp.sort(reverse=True)
+                for nnod in nsupp:
+                    if nnod in self.markers:
+                        self.markers[nnod] = max(self.markers[nnod],
+                                                 rsupp[1])
+                    else:
+                        self.markers[nnod] = rsupp[1]
             # move to next node
             cnod = best_nnod
 
     def nbMarkers(self):
         return (len(self.markers))
+
+    def keepTopMarkers(self, n_top=10):
+        if self.nbMarkers() > n_top:
+            mark_ord = sorted(list(self.markers.keys()),
+                              key=lambda nn: -self.markers[nn])
+            mark_ord = mark_ord[:n_top]
+            mark_torm = []
+            for nod in self.markers:
+                if nod not in mark_ord:
+                    mark_torm.append(nod)
+            for nod in mark_torm:
+                del self.markers[nod]
 
     def biClusterReads(self):
         # prepare marker signature for each read
@@ -658,7 +678,7 @@ class Subreads:
         # enumerate cluster sequence
         cur_paths = [['flankl']]
         final_paths = []
-        while len(cur_paths) > 0:
+        while len(cur_paths) > 0 and len(final_paths) < 600:
             path = cur_paths.pop(0)
             next_cls = []
             if path[-1] == 'flankr':

@@ -442,7 +442,7 @@ def runRscript(script_r, args):
                     outf.write(tout)
         outf.close()
         rscript_cmd += ['-r', reads_fn]
-    if v_mode in ['all', 'all_small', 'paths']:
+    if v_mode in ['all', 'all_small', 'diplotype']:
         if args.d == '' or args.p == '':
             print('This visualization mode requires paths input (-d and -p).')
             exit(1)

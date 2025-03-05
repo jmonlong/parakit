@@ -24,16 +24,18 @@ def findPaths(nodes, reads, args):
     if args.t:
         print("\tMinimum read support: {}".format(args.c))
     # enumerate path candidates by clustering (sub)reads
+    nattempt = 1
     paths = clusterSubreads(nodes, reads, min_read_support=args.c,
-                            verbose=args.t)
+                            verbose=args.t, attempt=nattempt)
     # if too many paths, rerun with more stringent read support
     while len(paths) > 500:
         args.c += 1
+        nattempt += 1
         if args.t:
             print("\tToo many paths ({}). Rerunning with min read support: "
                   "{}".format(len(paths), args.c))
         paths = clusterSubreads(nodes, reads, min_read_support=args.c,
-                                verbose=args.t)
+                                verbose=args.t, attempt=nattempt)
 
     # potentially first select the best paths (in case there are too
     # many paths and we don't want to consider all pairs)
@@ -112,7 +114,7 @@ def findPaths(nodes, reads, args):
 
 
 def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3,
-                    verbose=False):
+                    verbose=False, attempt=1):
     # init subreads
     sreads = pkc.Subreads()
     sreads.splitReads(reads, nodes)
@@ -133,6 +135,14 @@ def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3,
         csreads.findMarkers(min_read_support=min_read_support)
         # if some supported markers
         if csreads.nbMarkers() > 0:
+            if verbose:
+                print('{} marker found, splitting'.format(csreads.nbMarkers()))
+            # experimental change to only use top markers? enable once tested
+            if csreads.nbMarkers() > 10 and False:
+                csreads.keepTopMarkers(10)
+                if verbose:
+                    print('{} marker kept before '
+                          'splitting'.format(csreads.nbMarkers()))
             # split the reads in two
             csreads.biClusterReads()
             sreads_list.append(csreads.subsetByCluster(0))
@@ -142,6 +152,13 @@ def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3,
             print('\t\tWatchdog: {} clusters in '
                   'progress ({} finished).'.format(len(sreads_list),
                                                    len(sreads_list_final)))
+        if len(sreads_list_final) > 50:
+            if attempt > 3:
+                print("Warning: more than 50 module-read clusters found with"
+                      " multiple marker support threshold (currently {}). "
+                      "The reads might be too short/noisy for accurate "
+                      "diplotyping.".format(min_read_support))
+            return ([True] * 10000)
     # enumerate alleles
     if verbose:
         print('\t\tEnumerating haplotypes from {} '
