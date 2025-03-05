@@ -56,6 +56,10 @@ pars_diplotype.add_argument('-r', help='input alignments in GAF', required=True)
 pars_diplotype.add_argument('-o', help='output TSV prefix', required=True)
 pars_diplotype.add_argument('-c', default=3, type=float,
                             help='minimum read support for subread clustering.')
+pars_diplotype.add_argument('-m', help='maximum number of subread clusters '
+                            'and haplotype to consider (comma-separated). '
+                            'Default: "50,50"',
+                            default='50,50')
 pars_diplotype.add_argument('-t', help='debug trace mode', action='store_true')
 pars_diplotype.set_defaults(scmd='diplotype')
 

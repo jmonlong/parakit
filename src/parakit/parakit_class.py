@@ -623,8 +623,8 @@ class Subreads:
             cons_path.append(cnod)
         return (cons_path)
 
-    def enumerateAlleles(self, cluster_list, max_cycles=3, min_read_support=3,
-                         verbose=False):
+    def enumerateAlleles(self, cluster_list, max_cycles=3, max_haps=500,
+                         min_read_support=3, verbose=False):
         # make a consensus path for each cluster
         cl_paths = []
         for cl in cluster_list:
@@ -676,13 +676,13 @@ class Subreads:
                                 block_e[cl_s][cl_e] = 0
                             block_e[cl_s][cl_e] += 1
         # enumerate cluster sequence
-        cur_paths = [['flankl']]
+        cur_paths = [{'path': ['flankl'], 'support': []}]
         final_paths = []
-        while len(cur_paths) > 0 and len(final_paths) < 600:
-            path = cur_paths.pop(0)
-            next_cls = []
+        while len(cur_paths) > 0 and len(final_paths) < 20000:
+            cpath = cur_paths.pop(0)
+            path = cpath['path']
             if path[-1] == 'flankr':
-                final_paths.append(path)
+                final_paths.append(cpath)
                 continue
             if path[-1] in block_e:
                 for cl in block_e[path[-1]]:
@@ -691,20 +691,34 @@ class Subreads:
                     #    path.count(cl) <= max_cycles:
                     if block_e[path[-1]][cl] >= min_read_support and \
                        len(path) < max_cycles + 1:
-                        next_cls.append(cl)
-            if len(next_cls) > 0:
-                for cl in next_cls:
-                    cur_paths.append(path + [cl])
-            else:
-                if path[0] == 'flankl' and path[-1] == 'flankr':
-                    final_paths.append(path)
+                        npath = {}
+                        npath['path'] = path + [cl]
+                        npath['support'] = cpath['support'] + [block_e[path[-1]][cl]]
+                        cur_paths.insert(0, npath)
             if verbose and len(cur_paths) % 5000 == 0 and len(cur_paths) > 0:
                 print('\t\tWatchdog: {} haplotype candidate in '
                       'progress ({} finished).'.format(len(cur_paths),
                                                        len(final_paths)))
         # enumerate (node) paths
         final_paths_n = {}
-        for path in final_paths:
+        sorted_idx = sorted(list(range(len(final_paths))),
+                            key=lambda ii: -float(sum(final_paths[ii]['support'])) / len(final_paths[ii]))
+        mod_n = {}
+        warn_printed = False
+        for ii in sorted_idx:
+            path = final_paths[ii]['path']
+            if len(path) not in mod_n:
+                mod_n[len(path)] = 0
+            mod_n[len(path)] += 1
+            # if too many paths, keep the top ones
+            # (higest mean block-junction support)
+            if mod_n[len(path)] >= max_haps:
+                if verbose and not warn_printed:
+                    print("\t\t\tToo many haplotypes ({}). Attempting to keep "
+                          "the top {} for each module "
+                          "number.".format(len(final_paths), max_haps))
+                    warn_printed = True
+                continue
             path_exp = []
             for cl in path:
                 if cl == 'flankl':

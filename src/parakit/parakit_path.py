@@ -6,6 +6,11 @@ import math
 def findPaths(nodes, reads, args):
     if args.t:
         print("Enumerating candidate haplotypes..")
+    # other parameters (add to command line one day?)
+    if args.m:
+        args_m = args.m.split(',')
+        max_cls = int(args_m[0])
+        max_haps = int(args_m[1])
     # upate nodes with read info
     for readn in reads.path:
         path = reads.path[readn]
@@ -24,18 +29,31 @@ def findPaths(nodes, reads, args):
     if args.t:
         print("\tMinimum read support: {}".format(args.c))
     # enumerate path candidates by clustering (sub)reads
+    # first cluster subreads
     nattempt = 1
-    paths = clusterSubreads(nodes, reads, min_read_support=args.c,
-                            verbose=args.t, attempt=nattempt)
-    # if too many paths, rerun with more stringent read support
-    while len(paths) > 500:
-        args.c += 1
+    min_read_support = args.c
+    sreads, sread_cls = clusterSubreads(nodes, reads,
+                                        min_read_support=min_read_support,
+                                        max_cls=max_cls,
+                                        verbose=args.t, attempt=nattempt)
+    # if too many subreads clusters, rerun with more stringent read support
+    while len(sread_cls) > max_cls:
+        min_read_support += 1
         nattempt += 1
         if args.t:
-            print("\tToo many paths ({}). Rerunning with min read support: "
-                  "{}".format(len(paths), args.c))
-        paths = clusterSubreads(nodes, reads, min_read_support=args.c,
-                                verbose=args.t, attempt=nattempt)
+            print("\tToo many subread clusters ({}). Rerunning with min "
+                  "read support: {}".format(len(sread_cls), min_read_support))
+        sreads, sread_cls = clusterSubreads(nodes, reads,
+                                            min_read_support=min_read_support,
+                                            max_cls=max_cls,
+                                            verbose=args.t, attempt=nattempt)
+    # then enumerate path candidates from subread clusters
+    if args.t:
+        print('\t\tEnumerating haplotypes from {} '
+              'clusters...'.format(len(sread_cls)))
+    paths = sreads.enumerateAlleles(sread_cls, max_cycles=4, max_haps=max_haps,
+                                    min_read_support=args.c,
+                                    verbose=args.t)
 
     # potentially first select the best paths (in case there are too
     # many paths and we don't want to consider all pairs)
@@ -113,8 +131,8 @@ def findPaths(nodes, reads, args):
     return ({'escores': escores_r, 'paths': paths})
 
 
-def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3,
-                    verbose=False, attempt=1):
+def clusterSubreads(nodes, reads, min_read_support=3,
+                    max_cls=50, verbose=False, attempt=1):
     # init subreads
     sreads = pkc.Subreads()
     sreads.splitReads(reads, nodes)
@@ -136,7 +154,7 @@ def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3,
         # if some supported markers
         if csreads.nbMarkers() > 0:
             if verbose:
-                print('{} marker found, splitting'.format(csreads.nbMarkers()))
+                print('{} marker(s) found, splitting'.format(csreads.nbMarkers()))
             # experimental change to only use top markers? enable once tested
             if csreads.nbMarkers() > 10 and False:
                 csreads.keepTopMarkers(10)
@@ -148,25 +166,18 @@ def clusterSubreads(nodes, reads, min_read_support=3, max_cycles=3,
             sreads_list.append(csreads.subsetByCluster(0))
             sreads_list.append(csreads.subsetByCluster(1))
         # iterate until no clear markers suggesting two alleles
-        if verbose and len(sreads_list) % 50 == 0 and len(sreads_list) > 0:
+        if verbose and len(sreads_list) % 100 == 0 and len(sreads_list) > 0:
             print('\t\tWatchdog: {} clusters in '
                   'progress ({} finished).'.format(len(sreads_list),
                                                    len(sreads_list_final)))
-        if len(sreads_list_final) > 50:
+        if len(sreads_list_final) > max_cls:
             if attempt > 3:
-                print("Warning: more than 50 module-read clusters found with"
+                print("Warning: more than {} module-read clusters found with"
                       " multiple marker support threshold (currently {}). "
                       "The reads might be too short/noisy for accurate "
-                      "diplotyping.".format(min_read_support))
-            return ([True] * 10000)
-    # enumerate alleles
-    if verbose:
-        print('\t\tEnumerating haplotypes from {} '
-              'clusters...'.format(len(sreads_list_final)))
-    res = sreads.enumerateAlleles(sreads_list_final, max_cycles=4,
-                                  min_read_support=min_read_support,
-                                  verbose=verbose)
-    return (res)
+                      "diplotyping.".format(max_cls, min_read_support))
+            return ((sreads, sreads_list_final))
+    return (sreads, sreads_list_final)
 
 
 def pathReadGraphAlign(path, reads, nodes={}, max_node_gap=10):
