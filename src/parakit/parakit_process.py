@@ -408,6 +408,18 @@ def runRscript(script_r, args):
             print('This visualization mode requires calls input (-c).')
             exit(1)
         rscript_cmd += ['-c', args.c]
+    # check that there are calls to display
+    if v_mode == 'calls':
+        ncalls = 0
+        with open(args.c, 'rt') as inf:
+            for line in inf:
+                ncalls += 1
+        if ncalls < 2:
+            # make an empty PDF file
+            pdf_f = open(out_pdf, 'wt')
+            pdf_f.close()
+            print('No calls to display')
+            return (True)
     if v_mode in ['all', 'all_small', 'calls', 'allele_support', 'annotate']:
         # load node info
         nodes = pkio.readNodeInfo(args.n)
@@ -447,6 +459,18 @@ def runRscript(script_r, args):
             print('This visualization mode requires paths input (-d and -p).')
             exit(1)
         rscript_cmd += ['-d', args.d, '-p', args.p]
+        # check that there are diplotype to display
+        if v_mode == 'diplotype':
+            npaths = 0
+            with open(args.d, 'rt') as inf:
+                for line in inf:
+                    npaths += 1
+            if npaths < 2:
+                # make an empty PDF file
+                pdf_f = open(out_pdf, 'wt')
+                pdf_f.close()
+                print('No diplotype to display')
+                return (True)
     if 'l' in args and args.l != '':
         rscript_cmd += ['-l', args.l]
 

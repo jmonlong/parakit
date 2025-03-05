@@ -131,13 +131,7 @@ if(args$viz$val %in% c('calls', 'all', 'all_small', 'allele_support', 'annotate'
 ## Calls and supporting reads
 ##
 
-if(args$viz$val %in% c('calls', 'all', 'all_small')){
-
-  ## load read-variants table
-  vars = read.table(args$calls$val, as.is=TRUE, header=TRUE, check.names=F)
-  vars = vars %>% mutate(variant=factor(variant, unique(variant)),
-                         allele=factor(allele, c('alt', 'ref', 'NA')))
-
+callsGraph <- function(vars){
   ## cluster reads
   vars.m = vars %>% mutate(allele=as.numeric(allele)) %>% select(read, variant, allele) %>%
     mutate(allele=ifelse(is.na(allele), '0', allele)) %>% 
@@ -171,6 +165,13 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
       head(as.numeric(args$nreads$val)) %>% .$read
     reads.to.plot = c(reads.to.plot, norm.reads)
   }
+
+  if(length(reads.to.plot) == 0){
+    return(list(ggp.reads=ggplot() + theme_void(),
+                var.vl=NULL,
+                xlims_v=xlims_v,
+                output=FALSE))
+  }
   
   ## prepare data.frame for graph
   ## keep reads to show, split, add variant info
@@ -202,12 +203,12 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
   ## (between 0 and 0.5 to not overlap with other parts of the graph)
   path.v.shift.reads = .2
   ## prepare ggplot object
-  ggp$reads = ggplot(ggp.vars.df, aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) + xlab('node position in the pangenome')
+  ggp.reads = ggplot(ggp.vars.df, aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) + xlab('node position in the pangenome')
   if(fig.scale == 'genome') {
-    ggp$reads = ggplot(ggp.vars.df, aes(x=pos, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) + xlab('position in the chromosome')
+    ggp.reads = ggplot(ggp.vars.df, aes(x=pos, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) + xlab('position in the chromosome')
   }
   
-  ggp$reads = ggp$reads + var.vl + 
+  ggp.reads = ggp.reads + var.vl + 
     geom_point(aes(shape=variant), data=ggp.vars.pts, size=3) +
     geom_point(aes(color=class, alpha=ntype)) +
     scale_color_brewer(name='module', palette='Set1') +
@@ -229,6 +230,22 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
   } else {
     xlims_v = c(xlims_v, ggp.vars.df$node)
   }
+
+  return(list(ggp.reads=ggp.reads, xlims_v=xlims_v, var.vl=var.vl, output=TRUE))
+}
+
+if(args$viz$val %in% c('calls', 'all', 'all_small')){
+
+  ## load read-variants table
+  vars = read.table(args$calls$val, as.is=TRUE, header=TRUE, check.names=F)
+  vars = vars %>% mutate(variant=factor(variant, unique(variant)),
+                         allele=factor(allele, c('alt', 'ref', 'NA')))
+
+  calls.graph = callsGraph(vars)
+
+  ggp$reads = calls.graph$ggp.reads
+  var.vl = calls.graph$var.vl
+  xlims_v = calls.graph$xlims_v
 }
 
 ##
@@ -401,11 +418,12 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
 ## haplotypes
 ##
 
-if(args$viz$val %in% c('diplotype', 'all', 'all_small')){
-  ## load stats on pairs of predicted haplotypes
-  stats = read.table(args$hstats$val, as.is=TRUE, header=TRUE)
-  ## load information for each predicted haplotype
-  haps = read.table(args$hpaths$val, as.is=TRUE, header=TRUE)
+diplotypeGraph <- function(stats, haps){
+  if(nrow(stats) == 0){
+    return(list(ggp.haps.s=ggplot() + theme_void(),
+                ggp.haps=ggplot() + theme_void(),
+                xlims_v=xlims_v))
+  }
   ## if same haplotype selected twice, duplicate with a different name
   if(stats$hap1[1] == stats$hap2[1]){
     new_hapn = paste0(stats$hap1[1], '_d')
@@ -427,19 +445,19 @@ if(args$viz$val %in% c('diplotype', 'all', 'all_small')){
   ## how much to vertically shift the points of different classes (for aesthetic purpose)
   path.v.shift.haps = 20
   if(fig.scale == 'pangenome'){
-    ggp$haps = ggplot(ggp.haps.df, aes(x=node,
+    ggp.haps = ggplot(ggp.haps.df, aes(x=node,
                                        y=ppos + path.v.shift.haps*(as.numeric(class) - 1),
                                        color=class, alpha=ntype)) +
       xlab('node in collapsed pangenome')
   } else {
-    ggp$haps = ggplot(ggp.haps.df, aes(x=pos,
+    ggp.haps = ggplot(ggp.haps.df, aes(x=pos,
                                        y=ppos + path.v.shift.haps*(as.numeric(class) - 1),
                                        color=class, alpha=ntype)) +
       xlab('position in chromosome')
   }
 
   ## "dot plot" visualization: x=pangenome position, y=haplotype position
-  ggp$haps = ggp$haps +
+  ggp.haps = ggp.haps +
     geom_point() +
     scale_color_brewer(name='module', palette='Set1') +
     scale_alpha_manual(values=c(.8,.05), name='node') + 
@@ -461,16 +479,16 @@ if(args$viz$val %in% c('diplotype', 'all', 'all_small')){
   path.v.shift.reads = .2
 
   if(fig.scale == 'pangenome'){
-    ggp$haps.s = ggplot(ggp.haps.s.df, aes(x=node,
+    ggp.haps.s = ggplot(ggp.haps.s.df, aes(x=node,
                                            y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +
       xlab('node in collapsed pangenome')
   } else {
-    ggp$haps.s = ggplot(ggp.haps.s.df, aes(x=pos,
+    ggp.haps.s = ggplot(ggp.haps.s.df, aes(x=pos,
                                            y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +
       xlab('position in chromosome')
   }
 
-  ggp$haps.s = ggp$haps.s +
+  ggp.haps.s = ggp.haps.s +
     geom_point(aes(color=class, alpha=ntype)) +
     scale_color_brewer(name='module', palette='Set1') +
     scale_alpha_manual(values=c(.7,.05), name='node') +
@@ -492,6 +510,20 @@ if(args$viz$val %in% c('diplotype', 'all', 'all_small')){
     xlims_v = c(xlims_v, ggp.haps.s.df$node)
   }
 
+  return(list(ggp.haps.s=ggp.haps.s, ggp.haps=ggp.haps, xlims_v=xlims_v))
+}
+
+if(args$viz$val %in% c('diplotype', 'all', 'all_small')){
+  ## load stats on pairs of predicted haplotypes
+  stats = read.table(args$hstats$val, as.is=TRUE, header=TRUE)
+  ## load information for each predicted haplotype
+  haps = read.table(args$hpaths$val, as.is=TRUE, header=TRUE)
+
+  dip.graph = diplotypeGraph(stats, haps)
+
+  ggp$haps.s = dip.graph$ggp.haps.s
+  ggp$haps = dip.graph$ggp.haps
+  xlims_v = dip.graph$xlims_v
 }
 
 ##
