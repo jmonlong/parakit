@@ -159,8 +159,19 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
   reads.to.plot = vars %>% filter(allele=='alt') %>%
     select(variant, read) %>% unique %>% 
     merge(rl.df) %>%
-    arrange(desc(length)) %>% group_by(variant) %>% do(head(., as.numeric(args$nreads$val))) %>% .$read
-    
+    arrange(desc(length)) %>% group_by(variant) %>%
+    do(head(., as.numeric(args$nreads$val))) %>% .$read
+
+  ## add the most 'normal'-looking reads to the call figure
+  if(args$viz$val == 'calls'){
+    norm.reads = vars %>% group_by(read) %>%
+      summarize(nref=sum(allele=='ref', na.rm=TRUE),
+                nalt=sum(allele=='alt', na.rm=TRUE), .groups='drop') %>%
+      filter(nalt==0, nref>0) %>% merge(rl.df) %>% arrange(desc(nref), desc(length)) %>%
+      head(as.numeric(args$nreads$val)) %>% .$read
+    reads.to.plot = c(reads.to.plot, norm.reads)
+  }
+  
   ## prepare data.frame for graph
   ## keep reads to show, split, add variant info
   ggp.vars.df = reads.i %>%
@@ -702,7 +713,7 @@ if(args$viz$val == 'calls'){
   plot_grid(ggp$reads + 
             ggp.xlims + nox,
             ggp$genes + ggp.xlims + labs(caption=args$label$val),
-            ncol=1, align='v', rel_heights=c(4,1.8))
+            ncol=1, align='v', rel_heights=c(4,1.5))
 }
 
 if(args$viz$val == 'diplotype'){

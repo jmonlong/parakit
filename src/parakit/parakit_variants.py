@@ -89,6 +89,8 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
     # for later: list candidate reads supporting a functional allele
     # because containing at least one module 2 "window"
     cand_func_reads = {}
+    # also record all the reads with some fusion signal
+    cand_fus_reads = {}
     # we'll keep cases with at least 3 supporting reads
     # we don't want to "discover" the cycle going from module 1 to 2
     # hence we don't want fusion around the position of the cycle
@@ -152,6 +154,7 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
             continue
         # compute a score to measure how much the flank are c1-c2 specific
         for ii in range(nmarkers, len(marks_n) - nmarkers):
+            # test for a switch c1 -> c2
             c1_n = marks_c[(ii-nmarkers+1):(ii+1)].count('c1')
             c2_n = marks_c[(ii+1):(ii+nmarkers+1)].count('c2')
             score = min(c2_n / nmarkers, c1_n / nmarkers)
@@ -168,10 +171,8 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
                 if marks_n[ii] not in fus_reads:
                     fus_reads[marks_n[ii]] = []
                 fus_reads[marks_n[ii]].append(fus_info)
-            if c2_n / nmarkers > .5 and c1_n / nmarkers < .5 and \
-               nodes[marks_n[ii]]['rpos_min'] > min_pos_var:
-                cand_func_reads[readn] = True
-            # same but the other way around
+                cand_fus_reads[readn] = True
+            # test for a switch c2 -> c1
             c1_n = marks_c[(ii-nmarkers+1):(ii+1)].count('c2')
             c2_n = marks_c[(ii+1):(ii+nmarkers+1)].count('c1')
             score = min(c2_n / nmarkers, c1_n / nmarkers)
@@ -179,15 +180,17 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
             if score > .8:
                 # save info about the breakpoint
                 fus_info = {'node_l': marks_n[ii],
-                            'pos_l_1': marks_p1[ii],
-                            'pos_l_2': marks_p2[ii],
+                            'pos_l_1': marks_p2[ii],
+                            'pos_l_2': marks_p1[ii],
                             'node_u': marks_n[ii+1],
-                            'pos_u_1': marks_p1[ii+1],
-                            'pos_u_2': marks_p2[ii+1],
+                            'pos_u_1': marks_p2[ii+1],
+                            'pos_u_2': marks_p1[ii+1],
                             'readn': readn}
                 if marks_n[ii] not in fus_reads:
                     fus_reads[marks_n[ii]] = []
                 fus_reads[marks_n[ii]].append(fus_info)
+                cand_fus_reads[readn] = True
+            # mark reads with no signal there
             if c2_n / nmarkers > .5 and c1_n / nmarkers < .5 and \
                nodes[marks_n[ii]]['rpos_min'] > min_pos_var:
                 cand_func_reads[readn] = True
@@ -285,8 +288,14 @@ def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
         for varid in var_names:
             for_tsv_r = '\t'.join([read, varid, var_node[varid][1]])
             if read not in read_sum or varid not in read_sum[read]:
+                # here check if we think the reads supports a ref allele
+                ref_supp = varid in var_reads_ref and \
+                    read in var_reads_ref[varid]
+                ref_supp |= 'FUS' in varid and \
+                    read in cand_func_reads and \
+                    read not in cand_fus_reads
                 # check if the read support a reference node for this variant
-                if varid in var_reads_ref and read in var_reads_ref[varid]:
+                if ref_supp:
                     # if so, print ----
                     to_print += '-' * len(varid) + '\t'
                     for_tsv.append(for_tsv_r + '\tref\t' + for_tsv_nas)
