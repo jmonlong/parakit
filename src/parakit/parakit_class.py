@@ -1,5 +1,6 @@
 import networkx as nx
 import parakit.parakit_path as pkpath
+import random
 
 
 class ReadPosList:
@@ -347,6 +348,8 @@ class Subreads:
         self.ecov_prev = {}
         # saves the node markers where subreads differ to use for clustering
         self.markers = {}
+        # saves the site markers where subreads differ to use for EM clustering
+        self.site_markers = {}
         # saves the bi-partition for each subread
         self.sparts = {}
 
@@ -494,15 +497,19 @@ class Subreads:
 
     def findMarkers(self, min_read_support=3):
         self.markers = {}
+        self.site_markers = []
         # start from within the collapsed part of the pangenome
         cnod = self.cyc_edge[1]
         while cnod != self.cyc_edge[0]:
             if cnod not in self.ecov or len(self.ecov[cnod]) == 0:
+                # no edge coverage, look at the coverage from previous rounds
+                # first check if we know that "previous" coverage
                 if cnod not in self.ecov_prev:
                     self.ecov_prev[cnod] = {}
                 if len(self.ecov_prev[cnod]) == 0:
+                    # if missing, set coverage to 1
                     self.ecov_prev[cnod][self.nsucs[cnod]] = 1
-                # no coverage, look at the coverage from previous round
+                # set edge coverage to most supported edge in previous round
                 best_nnod = ''
                 best_supp = 0
                 for nnod in self.ecov_prev[cnod]:
@@ -533,6 +540,7 @@ class Subreads:
                                                  rsupp[1])
                     else:
                         self.markers[nnod] = rsupp[1]
+                self.site_markers.append({'prev': cnod, "next": nsupp})
             # move to next node
             cnod = best_nnod
 
@@ -589,6 +597,7 @@ class Subreads:
                 sreads_cl.path[sreadn] = self.path[sreadn]
         sreads_cl.ecov_prev = self.ecov
         sreads_cl.nsucs = self.nsucs
+        sreads_cl.computeCoverage()
         return (sreads_cl)
 
     def getConsensus(self):
@@ -600,7 +609,7 @@ class Subreads:
                 if cnod not in self.ecov_prev:
                     self.ecov_prev[cnod] = {}
                 if len(self.ecov_prev[cnod]) == 0:
-                    self.ecov_prev[cnod][self.sucs[cnod]] = 1
+                    self.ecov_prev[cnod][self.nsucs[cnod]] = 1
                 # no coverage, look at the coverage from previous round
                 best_nnod = ''
                 best_supp = 0
@@ -623,13 +632,7 @@ class Subreads:
             cons_path.append(cnod)
         return (cons_path)
 
-    def enumerateAlleles(self, cluster_list, max_cycles=3, max_haps=500,
-                         min_read_support=3, verbose=False):
-        # make a consensus path for each cluster
-        cl_paths = []
-        for cl in cluster_list:
-            cl_paths.append(cl.getConsensus())
-        # assign each subread to best cluster (duplicate ties)
+    def assignReads(self, cl_paths):
         cl_assign = {}
         rscores = {}
         for cl_path in cl_paths:
@@ -646,7 +649,181 @@ class Subreads:
             for cl_ii, rscore in enumerate(rscores[sreadn]):
                 if rscore > max_rscore * .98:
                     cl_assign[sreadn].append(cl_ii)
+        return (cl_assign)
+
+    def enumAlleles(self, cluster_list, max_cycles=3, max_haps=500,
+                    min_read_support=3, verbose=False):
+        # print the cluster sizes
+        if verbose:
+            print('\t\tEnumerating haplotypes from {} '
+                  'clusters...'.format(len(cluster_list)))
+        # make a consensus path for each cluster
+        cl_paths = []
+        for cl in cluster_list:
+            cl_paths.append(cl.getConsensus())
+        # assign each subread to best cluster (duplicate ties)
+        cl_assign = self.assignReads(cl_paths)
         # link subread clusters using read splitting information
+        block_e = self.buildClusterEdges(cl_assign)
+        # enumerate cluster sequence
+        cur_paths = [{'path': ['flankl'], 'support': []}]
+        final_paths = []
+        while len(cur_paths) > 0 and len(final_paths) < 20000:
+            cpath = cur_paths.pop(0)
+            path = cpath['path']
+            if path[-1] == 'flankr':
+                final_paths.append(cpath)
+                continue
+            if path[-1] in block_e:
+                for cl in block_e[path[-1]]:
+                    # TODO improve threshold for block edges?
+                    # if block_e[path[-1]][cl] >= min_read_support and \
+                    #    path.count(cl) <= max_cycles:
+                    if block_e[path[-1]][cl] >= min_read_support and \
+                       len(path) < max_cycles + 1:
+                        npath = {}
+                        npath['path'] = path + [cl]
+                        npath['support'] = cpath['support']
+                        npath['support'] += [block_e[path[-1]][cl]]
+                        cur_paths.insert(0, npath)
+            if verbose and len(cur_paths) % 5000 == 0 and len(cur_paths) > 0:
+                print('\t\tWatchdog: {} haplotype candidate in '
+                      'progress ({} finished).'.format(len(cur_paths),
+                                                       len(final_paths)))
+        # enumerate (node) paths
+        return (self.clustersToPaths(final_paths, cl_paths, max_haps=max_haps,
+                                     verbose=verbose))
+
+    def clusterEM(self, nprofiles, nalleles=2, verbose=False):
+        # prepare markers to use
+        nmarkers = 0
+        site_markers = {}
+        cur_pos = 0
+        for smark in self.site_markers:
+            mnodes = smark['next']
+            if len(mnodes) == nalleles:
+                nmarkers += 1
+                for val in range(nalleles):
+                    en = '{}_{}'.format(smark['prev'], mnodes[val])
+                    site_markers[en] = [cur_pos, val]
+                cur_pos += 1
+        # prepare a map (sread name -> Observation) marker status
+        read_prof = {}
+        for sreadn in self.path:
+            pos_v = []
+            val_v = []
+            for rpos in range(len(self.path[sreadn])-1):
+                en = '{}_{}'.format(self.path[sreadn][rpos],
+                                    self.path[sreadn][rpos+1])
+                if en in site_markers:
+                    pos_v.append(site_markers[en][0])
+                    val_v.append(site_markers[en][1])
+            obs = Observation(pos_v, val_v)
+            # obs.imputeGaps()
+            read_prof[sreadn] = obs
+        # if verbose:
+        #     print('\t\t\t\t{} markers, {} subreads'.format(nmarkers,
+        #                                                    len(read_prof)))
+        # to record the best set of N profiles
+        best_em = None
+        # init to a high score, like all reads having all pos wrong
+        best_em_ndiff = len(read_prof) * nmarkers
+        # try a couple of attempts and keep the best
+        for attempt in range(50):
+            # init the EM profiles
+            em = EM(nmarkers, nprofiles, values=list(range(nalleles)))
+            # iterate
+            for iter in range(100):
+                em.updateWithObs(read_prof)
+            em.consensusWithObs(read_prof)
+            ndiff = em.consensusWithObs(read_prof)
+            if ndiff < best_em_ndiff:
+                best_em_ndiff = ndiff
+                best_em = em
+        # assign each subread to the most similar profile
+        # best_em.print()
+        for sreadn in read_prof:
+            cl = read_prof[sreadn].findBestEMProfile(best_em)
+            # print('{} {}'.format(sreadn, cl))
+            self.sparts[sreadn] = cl
+
+    def enumAllelePair(self, cluster_list, min_read_support=3,
+                       verbose=False):
+        # print the cluster sizes
+        if verbose:
+            cl_size = [len(scl.path) for scl in cluster_list]
+            cl_size.sort()
+            cl_size = [str(cls) for cls in cl_size]
+            print('\t\tEnumerating haplotypes from {} '
+                  'clusters (size {})...'.format(len(cluster_list),
+                                                 ', '.join(cl_size)))
+        # make a consensus path for each cluster
+        cl_paths = []
+        for cl in cluster_list:
+            cl_paths.append(cl.getConsensus())
+        # assign each subread to best cluster (duplicate ties)
+        cl_assign = self.assignReads(cl_paths)
+        # link subread clusters using read splitting information
+        block_e = self.buildClusterEdges(cl_assign)
+        # enumerate cluster sequence
+        cur_paths = [{'path': ['flankl'], 'support': []}]
+        all_paths = []
+        while len(cur_paths) > 0:
+            cpath = cur_paths.pop(0)
+            path = cpath['path']
+            if path[-1] == 'flankr':
+                all_paths.append(cpath)
+                continue
+            if path[-1] in block_e:
+                for cl in block_e[path[-1]]:
+                    if block_e[path[-1]][cl] >= min_read_support and \
+                       path.count(cl) == 0:
+                        npath = {}
+                        npath['path'] = path + [cl]
+                        npath['support'] = cpath['support'] + [block_e[path[-1]][cl]]
+                        cur_paths.insert(0, npath)
+            if verbose and len(cur_paths) % 5000 == 0 and len(cur_paths) > 0:
+                print('\t\tWatchdog: {} haplotype candidate in '
+                      'progress ({} finished).'.format(len(cur_paths),
+                                                       len(all_paths)))
+        # enumerate all compatible pairs
+        all_pairs = []
+        for p1 in all_paths:
+            for p2 in all_paths:
+                if p1 == p2:
+                    continue
+                if len(p1['path']) + len(p2['path']) != 4 + len(cl_paths):
+                    continue
+                compatible = True
+                for cl in p2['path']:
+                    if cl == 'flankr' or cl == 'flankl':
+                        continue
+                    if cl in p1['path']:
+                        compatible = False
+                        break
+                if compatible:
+                    all_pairs.append([p1, p2])
+        if len(all_pairs) == 0:
+            print('Warning: could not find a supported diplotype from {} '
+                  'subread clusters.'.format(len(cluster_list)))
+            return ({})
+        # pick best pair
+        best_supp = -1
+        best_pair = 0
+        for pp in all_pairs:
+            # compute the normalized support of the pair
+            # supp = sum(pp[0]['support']) / len(pp[0]['path'])
+            # supp += sum(pp[1]['support']) / len(pp[1]['path'])
+            supp = sum(pp[0]['support'])
+            supp += sum(pp[1]['support'])
+            # save best one
+            if supp > best_supp:
+                best_supp = supp
+                best_pair = pp
+        # enumerate (node) paths
+        return (self.clustersToPaths(best_pair, cl_paths, verbose=verbose))
+
+    def buildClusterEdges(self, cl_assign):
         block_e = {'flankl': {}}
         for sreadn in cl_assign:
             # subreads starting in the "left" flank
@@ -675,48 +852,30 @@ class Subreads:
                             if cl_e not in block_e[cl_s]:
                                 block_e[cl_s][cl_e] = 0
                             block_e[cl_s][cl_e] += 1
-        # enumerate cluster sequence
-        cur_paths = [{'path': ['flankl'], 'support': []}]
-        final_paths = []
-        while len(cur_paths) > 0 and len(final_paths) < 20000:
-            cpath = cur_paths.pop(0)
-            path = cpath['path']
-            if path[-1] == 'flankr':
-                final_paths.append(cpath)
-                continue
-            if path[-1] in block_e:
-                for cl in block_e[path[-1]]:
-                    # TODO improve threshold for block edges?
-                    # if block_e[path[-1]][cl] >= min_read_support and \
-                    #    path.count(cl) <= max_cycles:
-                    if block_e[path[-1]][cl] >= min_read_support and \
-                       len(path) < max_cycles + 1:
-                        npath = {}
-                        npath['path'] = path + [cl]
-                        npath['support'] = cpath['support'] + [block_e[path[-1]][cl]]
-                        cur_paths.insert(0, npath)
-            if verbose and len(cur_paths) % 5000 == 0 and len(cur_paths) > 0:
-                print('\t\tWatchdog: {} haplotype candidate in '
-                      'progress ({} finished).'.format(len(cur_paths),
-                                                       len(final_paths)))
-        # enumerate (node) paths
-        final_paths_n = {}
-        sorted_idx = sorted(list(range(len(final_paths))),
-                            key=lambda ii: -float(sum(final_paths[ii]['support'])) / len(final_paths[ii]))
+        return (block_e)
+
+    def clustersToPaths(self, paths, cl_paths,
+                        max_haps=None, verbose=False):
+        paths_n = {}
+
+        def getSupport(ii):
+            return (-float(sum(paths[ii]['support'])) / len(paths[ii]))
+        # sort paths by support
+        sorted_idx = sorted(list(range(len(paths))), key=getSupport)
         mod_n = {}
         warn_printed = False
         for ii in sorted_idx:
-            path = final_paths[ii]['path']
+            path = paths[ii]['path']
             if len(path) not in mod_n:
                 mod_n[len(path)] = 0
             mod_n[len(path)] += 1
             # if too many paths, keep the top ones
             # (higest mean block-junction support)
-            if mod_n[len(path)] >= max_haps:
+            if max_haps is not None and mod_n[len(path)] >= max_haps:
                 if verbose and not warn_printed:
                     print("\t\t\tToo many haplotypes ({}). Attempting to keep "
                           "the top {} for each module "
-                          "number.".format(len(final_paths), max_haps))
+                          "number.".format(len(paths), max_haps))
                     warn_printed = True
                 continue
             path_exp = []
@@ -727,11 +886,140 @@ class Subreads:
                     path_exp += self.flankn[0]
                 else:
                     path_exp += cl_paths[cl]
-            final_paths_n['_'.join([str(p) for p in path])] = path_exp
-        return (final_paths_n)
+            paths_n['_'.join([str(p) for p in path])] = path_exp
+        return (paths_n)
 
     def print(self):
         print('{} subreads, {} markers, '
               '{} partitioned subreads'.format(len(self.path),
                                                len(self.markers),
                                                len(self.sparts)))
+
+
+class Observation:
+    def __init__(self, positions, values):
+        self.pos = positions
+        self.val = values
+
+    def print(self):
+        out_h = ''
+        out_v = ''
+        prev_size = 1
+        for ii, pos in enumerate(self.pos):
+            out_h += ' ' * (4 - prev_size) + str(pos)
+            if self.val[ii]:
+                out_v += ' ' * (4 - 1) + '+'
+            else:
+                out_v += ' ' * (4 - 1) + '-'
+            prev_size = len(str(pos))
+        print(out_h)
+        print(out_v)
+
+    def findBestEMProfile(self, em):
+        best_ss = 0
+        best_count = 0
+        for ss in range(em.nstates):
+            match_count = 0
+            for ii, pp in enumerate(self.pos):
+                if em.prof[pp][ss] == self.val[ii]:
+                    match_count += 1
+            if match_count > best_count:
+                best_count = match_count
+                best_ss = ss
+        return (best_ss)
+
+    def imputeGaps(self):
+        new_pos = []
+        new_val = []
+        # check if gap in positions
+        cpos = None
+        for ii in range(len(self.pos)):
+            if cpos is not None:
+                while self.pos[ii] != cpos + 1:
+                    # if self.pos[ii] > cpos + 1:
+                    #     print('gap at {}'.format(ii))
+                    #     print(self.pos)
+                    #     print(self.val)
+                    #     break
+                    # if self.pos[ii] < cpos + 1:
+                    #     print('what!?')
+                    #     print(self.pos)
+                    #     print(self.val)
+                    #     break
+                    # missing some positions
+                    new_pos.append(cpos + 1)
+                    new_val.append(self.val[ii])
+                    cpos += 1
+            new_pos.append(self.pos[ii])
+            new_val.append(self.val[ii])
+            cpos = self.pos[ii]
+        # update data
+        self.pos = new_pos
+        self.val = new_val
+
+
+class EM:
+    def __init__(self, npos, nstates_per_pos, values=['c1', 'c2']):
+        self.prof = []
+        self.npos = npos
+        self.nstates = nstates_per_pos
+        self.values = values
+        for pp in range(self.npos):
+            vals = []
+            for ss in range(self.nstates):
+                # init with a random value
+                vals.append(random.sample(values, 1)[0])
+            self.prof.append(vals)
+
+    def print(self, digits=4):
+        for pp in range(self.npos):
+            tp = []
+            for val in self.prof[pp]:
+                tp.append('{}'.format(val))
+            print('S{}:\t'.format(pp) + '  '.join(tp))
+
+    def updateWithObs(self, obs):
+        obs_names = list(obs.keys())
+        random.shuffle(obs_names)
+        # loop over observations and integrate them one by one
+        for obsn in obs_names:
+            ob = obs[obsn]
+            # find the best profile
+            bprof = ob.findBestEMProfile(self)
+            # overwrite profile
+            for obs_idx, pp in enumerate(ob.pos):
+                self.prof[pp][bprof] = ob.val[obs_idx]
+
+    def consensusWithObs(self, obs):
+        # loop over observations, assign, and tally
+        counts = {}
+        for obn in obs:
+            ob = obs[obn]
+            # find the best profile
+            bprof = ob.findBestEMProfile(self)
+            # overwrite profile
+            for obs_idx, pp in enumerate(ob.pos):
+                oname = '{}_{}_{}'.format(pp, bprof, ob.val[obs_idx])
+                if oname not in counts:
+                    counts[oname] = 0
+                counts[oname] += 1
+        # pick the most supported value for each profile position
+        ndiffs = 0
+        for pp in range(self.npos):
+            for ss in range(self.nstates):
+                top_val = self.values[0]
+                top_val_c = 0
+                for val in self.values:
+                    oname = '{}_{}_{}'.format(pp, ss, val)
+                    if oname in counts and counts[oname] > top_val_c:
+                        top_val_c = counts[oname]
+                        top_val = val
+                self.prof[pp][ss] = top_val
+                # how many observations were different at this position
+                ndiffs_c = 0
+                for val in self.values:
+                    oname = '{}_{}_{}'.format(pp, ss, val)
+                    if oname in counts and val != top_val:
+                        ndiffs_c += counts[oname]
+                ndiffs += ndiffs_c
+        return (ndiffs)

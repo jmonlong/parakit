@@ -7,10 +7,18 @@ def findPaths(nodes, reads, args):
     if args.t:
         print("Enumerating candidate haplotypes..")
     # other parameters (add to command line one day?)
+    clust_mode = 'biclust'
     if args.m:
         args_m = args.m.split(',')
-        max_cls = int(args_m[0])
-        max_haps = int(args_m[1])
+        if len(args_m) == 2:
+            max_cls = int(args_m[0])
+            max_haps = int(args_m[1])
+        else:
+            clust_mode = 'em'
+            min_modc = int(args_m[0])
+            max_modc = int(args_m[1])
+            n_em_cand = int(args_m[2])
+            max_haps = 100
     # upate nodes with read info
     for readn in reads.path:
         path = reads.path[readn]
@@ -29,31 +37,39 @@ def findPaths(nodes, reads, args):
     if args.t:
         print("\tMinimum read support: {}".format(args.c))
     # enumerate path candidates by clustering (sub)reads
-    # first cluster subreads
-    nattempt = 1
-    min_read_support = args.c
-    sreads, sread_cls = clusterSubreads(nodes, reads,
-                                        min_read_support=min_read_support,
-                                        max_cls=max_cls,
-                                        verbose=args.t, attempt=nattempt)
-    # if too many subreads clusters, rerun with more stringent read support
-    while len(sread_cls) > max_cls:
-        min_read_support += 1
-        nattempt += 1
-        if args.t:
-            print("\tToo many subread clusters ({}). Rerunning with min "
-                  "read support: {}".format(len(sread_cls), min_read_support))
+    if clust_mode == 'biclust':
+        # first cluster subreads
+        nattempt = 1
+        min_rsupport = args.c
         sreads, sread_cls = clusterSubreads(nodes, reads,
-                                            min_read_support=min_read_support,
+                                            min_read_support=min_rsupport,
                                             max_cls=max_cls,
                                             verbose=args.t, attempt=nattempt)
-    # then enumerate path candidates from subread clusters
-    if args.t:
-        print('\t\tEnumerating haplotypes from {} '
-              'clusters...'.format(len(sread_cls)))
-    paths = sreads.enumerateAlleles(sread_cls, max_cycles=4, max_haps=max_haps,
-                                    min_read_support=args.c,
-                                    verbose=args.t)
+        # if too many subreads clusters, rerun with more stringent read support
+        while len(sread_cls) > max_cls:
+            min_rsupport += 1
+            nattempt += 1
+            if args.t:
+                print("\tToo many subread clusters ({}). Rerunning with min "
+                      "read support: {}".format(len(sread_cls),
+                                                min_rsupport))
+            sreads, sread_cls = clusterSubreads(nodes, reads,
+                                                min_read_support=min_rsupport,
+                                                max_cls=max_cls,
+                                                verbose=args.t,
+                                                attempt=nattempt)
+        # then enumerate path candidates from subread clusters
+        paths = sreads.enumAlleles(sread_cls, max_cycles=4,
+                                   max_haps=max_haps,
+                                   min_read_support=args.c,
+                                   verbose=args.t)
+    elif clust_mode == 'em':
+        paths = clusterSubreadsEM(nodes, reads,
+                                  min_read_support=args.c,
+                                  min_module_copies=min_modc,
+                                  max_module_copies=max_modc,
+                                  ncandidates=n_em_cand,
+                                  verbose=args.t)
 
     # potentially first select the best paths (in case there are too
     # many paths and we don't want to consider all pairs)
@@ -122,7 +138,10 @@ def findPaths(nodes, reads, args):
     cov_dev_a = (max_cov_dev - min_cov_dev)
     for esc in escores:
         esc['cov_cor_adj'] = esc['cov_cor'] / max_cor
-        esc['cov_dev_adj'] = (max_cov_dev - esc['cov_dev']) / cov_dev_a
+        if cov_dev_a == 0:
+            esc['cov_dev_adj'] = 1
+        else:
+            esc['cov_dev_adj'] = (max_cov_dev - esc['cov_dev']) / cov_dev_a
         esc['aln_score_adj'] = esc['aln_score'] / max_aln
     # rank hap pairs
     escores_r = sorted(escores,
@@ -136,6 +155,7 @@ def clusterSubreads(nodes, reads, min_read_support=3,
     # init subreads
     sreads = pkc.Subreads()
     sreads.splitReads(reads, nodes)
+    sreads.computeCoverage()
     if verbose:
         print('\t\tClustering subreads...')
     # init list of subreads clusters
@@ -149,7 +169,6 @@ def clusterSubreads(nodes, reads, min_read_support=3,
         # to be used for path enumeration later.
         sreads_list_final.append(csreads)
         # look at read coverage and find markers
-        csreads.computeCoverage()
         csreads.findMarkers(min_read_support=min_read_support)
         # if some supported markers
         if csreads.nbMarkers() > 0:
@@ -178,6 +197,40 @@ def clusterSubreads(nodes, reads, min_read_support=3,
                       "diplotyping.".format(max_cls, min_read_support))
             return ((sreads, sreads_list_final))
     return (sreads, sreads_list_final)
+
+
+def clusterSubreadsEM(nodes, reads, min_read_support=3, min_module_copies=1,
+                      max_module_copies=6, ncandidates=3, verbose=False):
+    module_copies = list(range(min_module_copies, max_module_copies + 1))
+    # init subreads
+    sreads = pkc.Subreads()
+    sreads.splitReads(reads, nodes)
+    sreads.computeCoverage()
+    sreads.findMarkers(min_read_support=min_read_support)
+    if verbose:
+        print('\t\tClustering subreads...')
+    # list of subreads clusters
+    # try to cluster in K profiles, K being any possible module number
+    paths = {}
+    for nmodules in module_copies:
+        # let's cluster the subreads multiple times to get
+        # more than one candidate
+        for ncand in range(ncandidates):
+            if verbose:
+                print('\t\t\t{} module(s) ({}/{})...'.format(nmodules,
+                                                             ncand + 1,
+                                                             ncandidates))
+            sreads.clusterEM(nmodules, verbose=verbose)
+            sreads_list = []
+            for mod in range(nmodules):
+                sreads_list.append(sreads.subsetByCluster(mod))
+            cpaths = sreads.enumAllelePair(sreads_list,
+                                           min_read_support=0,
+                                           verbose=verbose)
+            for pathn in cpaths:
+                new_pathn = '{}m_c{}_{}'.format(nmodules, ncand, pathn)
+                paths[new_pathn] = cpaths[pathn]
+    return (paths)
 
 
 def pathReadGraphAlign(path, reads, nodes={}, max_node_gap=10):
@@ -244,22 +297,22 @@ def pathReadGraphAlign(path, reads, nodes={}, max_node_gap=10):
 def evaluatePaths(read_cov, path_cov_1, path_cov_2,
                   nodes, reads,
                   longest_reads, read_aln, read_aln2=[]):
-    # correlation between coverage on the predicted path and the reads
+    # prepare vectors of read and node coverage across selected nodes
     read_c = []
     path_c = []
-    # add nodes in both paths or unique to first path
-    for nod in path_cov_1:
-        if nodes[nod]['size'] < 10:
-            read_c.append(read_cov[nod])
-            if nod in path_cov_2:
-                path_c.append(path_cov_1[nod] + path_cov_2[nod])
-            else:
-                path_c.append(path_cov_1[nod])
-    # add nodes unique to second path
-    for nod in path_cov_2:
-        if nodes[nod]['size'] < 10 and nod not in path_cov_1:
-            read_c.append(read_cov[nod])
-            path_c.append(path_cov_2[nod])
+    for nod in nodes:
+        if nodes[nod]['size'] >= 5:
+            # keep only small nodes, to keep it simple and focus on important
+            # nodes (those that are more likely copy-number variable)
+            continue
+        read_c.append(read_cov[nod])
+        pcov = 0
+        if nod in path_cov_1:
+            pcov += path_cov_1[nod]
+        if nod in path_cov_2:
+            pcov += path_cov_2[nod]
+        path_c.append(pcov)
+    # correlation between coverage on the predicted path and the reads
     if stat.variance(read_c) > 0 and stat.variance(path_c) > 0:
         cov_cor = stat.correlation(read_c, path_c)
     elif stat.variance(read_c) == 0 and stat.variance(path_c) == 0:
@@ -279,23 +332,26 @@ def evaluatePaths(read_cov, path_cov_1, path_cov_2,
     # read alignment on the path
     # compute alignment score
     aln_score = 0
+    max_aln_score = 0
     w_sum = 0
     for readn in reads:
         r_score = read_aln[readn]
         if len(read_aln2) > 0:
             r_score = max(read_aln2[readn], r_score)
         aln_score += r_score
+        max_aln_score = max(max_aln_score, r_score)
         w_sum += 1
     aln_score = float(aln_score) / w_sum
     # count how many of the top longest reads align well
+    aln_score_th = aln_score + .8 * (max_aln_score - aln_score)
     rii = 0
-    rii_tot = min(len(longest_reads), 20)
+    rii_tot = min(len(longest_reads), len(reads)/10)
     nsupp_reads = 0
     while rii < rii_tot:
         r_score = read_aln[longest_reads[rii]]
         if len(read_aln2) > 0:
             r_score = max(read_aln2[longest_reads[rii]], r_score)
-        if r_score > .99:
+        if r_score > aln_score_th:
             nsupp_reads += 1
         rii += 1
     # return scores
