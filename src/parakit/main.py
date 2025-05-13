@@ -77,6 +77,8 @@ pars_annotate.add_argument('-o', help='output PDF file',
                            default='parakit.viz.pdf')
 pars_annotate.add_argument('-e', help='input genome element annotation TSV',
                            default='')
+pars_annotate.add_argument('-s', default='pangenome',
+                           help='Optional. Scale for the x-axis. Either pangenome or genome. ')
 pars_annotate.add_argument('-t', help='debug trace mode', action='store_true')
 pars_annotate.set_defaults(scmd='annotate')
 

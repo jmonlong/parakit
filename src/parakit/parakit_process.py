@@ -358,10 +358,9 @@ def mapReads(in_fq, pg_gfa, out_gaf):
         # that will be zipped later
         ga_gaf = out_gaf + '.gaf'
     # check if GraphAligner is installed
-    if toolAvailable('GraphAligner'):
-        ga_cmd = ['GraphAligner', '-g', pg_gfa, '-f', in_fq, '-a', ga_gaf,
-                  '-x', 'vg', '-b', '100']
-    elif toolAvailable('docker'):
+    ga_cmd = ['GraphAligner', '-g', pg_gfa, '-f', in_fq, '-a', ga_gaf,
+              '-x', 'vg', '-b', '100']
+    if not toolAvailable('GraphAligner') and toolAvailable('docker'):
         # get USER id to make sure the file permission are correct with docker
         id_o = subprocess.run(['id', '-u', os.getenv('USER')],
                               check=True, capture_output=True)

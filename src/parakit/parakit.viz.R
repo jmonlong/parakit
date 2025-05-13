@@ -122,7 +122,7 @@ ninfo$pos = ninfo$pos + reg.offset
 ## load read information
 reads.df = NULL
 if(args$viz$val %in% c('calls', 'all', 'all_small', 'allele_support', 'annotate')){
-  reads.df = read.table(args$reads$val, as.is=TRUE, header=TRUE, comment.char="") %>%
+  reads.df = read.table(args$reads$val, as.is=TRUE, header=TRUE, comment.char="", sep='\t') %>%
     merge(ninfo)
 }
 
@@ -533,20 +533,24 @@ if(args$viz$val %in% c('diplotype', 'all', 'all_small')){
 if(args$viz$val == 'annotate'){
   ## split paths visualization (like for reads above)
   ggp.annot.df = reads.df %>%
-    group_by(read) %>% arrange(readpos) %>% do(splitPaths(.)) %>%
+    group_by(read) %>% filter(n()>1) %>% arrange(readpos) %>% do(splitPaths(.)) %>%
     ungroup %>% 
     mutate(class=factor(class, c('c1', 'none', 'c2'), c('1', 'both', '2')),
            ntype=ifelse(class!='both', 'module-specific', 'shared')) %>%
     filter(!is.na(class))
   
   path.v.shift.reads = .2
-  ggp$annot = ggplot(ggp.annot.df,
-                     aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) +
+  ggp.annot = ggplot(ggp.annot.df, aes(x=node, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) + xlab('node position in the pangenome')
+  if(fig.scale == 'genome') {
+    ggp.annot = ggplot(ggp.annot.df, aes(x=pos, y=path_part+path.v.shift.reads*(as.numeric(class) - 2))) + xlab('position in the chromosome')
+  }
+
+  ggp$annot = ggp.annot + 
     geom_point(aes(color=class, alpha=ntype)) +
     scale_color_brewer(name='module', palette='Set1') +
     scale_alpha_manual(values=c(.7,.05), name='node') +
     scale_y_continuous(breaks=1:10, expand=c(0,.3)) +
-    ylab('path\npart') + xlab('node position in the pangenome') +
+    ylab('path\npart') + 
     theme_bw() + 
     facet_grid(read~., scales='free', space='free') + 
     theme(legend.position='top',
@@ -556,18 +560,18 @@ if(args$viz$val == 'annotate'){
            color=guide_legend(ncol=2),
            shape=guide_legend(ncol=1))
 
-  path.v.shift.reads = max(ggp.annot.df$readpos) * .02
-  ggp$annot = ggplot(ggp.annot.df,
-                     aes(x=node,
-                         y=readpos + path.v.shift.reads*(as.numeric(class) - 1),
-                         color=class, alpha=ntype)) +
-    geom_point() +
+  path.v.shift.reads.2 = max(ggp.annot.df$readpos) * .02
+  ggp.annot2 = ggplot(ggp.annot.df, aes(x=node, y=readpos + path.v.shift.reads.2*(as.numeric(class) - 1))) + xlab('node position in the pangenome')
+  if(fig.scale == 'genome') {
+    ggp.annot2 = ggplot(ggp.annot.df, aes(x=pos, y=readpos+path.v.shift.reads.2*(as.numeric(class) - 2))) + xlab('position in the chromosome')
+  }
+  ggp$annot2 = ggp.annot2 + 
+    geom_point(aes(color=class, alpha=ntype)) +
     scale_color_brewer(name='module', palette='Set1') +
     scale_alpha_manual(values=c(.8,.05), name='node') + 
     facet_grid(read~., scales='free', space='free') + 
     theme_bw() +
     ylab('position in\ninput sequence') +
-    xlab('node position in the pangenome') + 
     theme(legend.position='top',
           axis.text.y=element_text(size=6),
           strip.text.y=element_text(size=4, angle=0)) +
@@ -576,7 +580,11 @@ if(args$viz$val == 'annotate'){
            shape=guide_legend(ncol=1))
 
   ## save the x-axis boundaries for later
-  xlims_v = c(xlims_v, ggp.annot.df$node)
+  if(fig.scale == 'genome') {
+    xlims_v = c(xlims_v, ggp.annot.df$pos)
+  } else {
+    xlims_v = c(xlims_v, ggp.annot.df$node)
+  }
 }
 
 ## to make sure all panels have the same x-axis limits
@@ -756,10 +764,12 @@ if(args$viz$val == 'diplotype'){
 }
 
 if(args$viz$val == 'annotate'){
-  plot_grid(ggp$annot +
+  plot_grid(ggp$annot2 +
+            ggp.xlims + nox,
+            ggp$annot + guides(alpha=FALSE, color=FALSE) +
             ggp.xlims + nox,
             ggp$genes + ggp.xlims + labs(caption=args$label$val),
-            ncol=1, align='v', rel_heights=c(2,1))
+            ncol=1, align='v', rel_heights=c(2,1,1))
 }
 
 if(args$viz$val == 'all'){
