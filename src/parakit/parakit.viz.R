@@ -326,7 +326,8 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
   cov.df = merge(cov.df, ninfo)
   
   ## assumes diploidy and normalize with coverage on the flanking region
-  cov.df = cov.df %>% ungroup %>% mutate(cov.n=2*cov/median(cov[which(class=='ref')]))
+  cov.med.flanks = cov.df %>% ungroup %>% filter(class=='ref') %>% .$cov %>% median
+  cov.df = cov.df %>% ungroup %>% mutate(cov.n=2*cov/cov.med.flanks)
   ## med.cov = cov.df %>% filter(class!='ref') %>% .$cov.n %>% median
 
   ## normalize using the edges flanking the module
@@ -401,7 +402,7 @@ if(args$viz$val %in% c('allele_support', 'all', 'all_small')){
     geom_hline(yintercept=med.cov.2, linetype=2, alpha=.7) +
     geom_hline(yintercept=fl_cyc_cn, linetype=3, alpha=.7) +
     ylab('estimated\ncopy number') +
-    facet_grid("coverage\n"~.) +
+    facet_grid(paste0('coverage\n(one copy\n~', round(cov.med.flanks/2, 1), ' reads)')~.) +
     scale_y_continuous(breaks=seq(0,10,2)) + 
     theme(legend.position='top', strip.text.y=element_text(angle=0))
 
@@ -516,6 +517,8 @@ diplotypeGraph <- function(stats, haps){
 if(args$viz$val %in% c('diplotype', 'all', 'all_small')){
   ## load stats on pairs of predicted haplotypes
   stats = read.table(args$hstats$val, as.is=TRUE, header=TRUE)
+  ## stats = stats %>% arrange(desc(cov_cor_adj + aln_score_adj))
+  ## stats = stats %>% arrange(desc(cov_dev_adj + aln_score_adj))
   ## load information for each predicted haplotype
   haps = read.table(args$hpaths$val, as.is=TRUE, header=TRUE)
 
