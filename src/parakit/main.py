@@ -163,7 +163,11 @@ def scmd_map(args):
     config = json.load(open(args.j, 'rt'))
     # extract local reads to fastq
     fq_fn = args.o + '.fq'
-    pkproc.extractReads(config, args.b, fq_fn, trace=args.t)
+    if args.b.endswith('.fq') or args.b.endswith('.fastq') or args.b.endswith('.fq.gz') or args.b.endswith('.fastq.gz'):
+        print('Using input FASTQ: {}'.format(args.b))
+        fq_fn = args.b
+    else:
+        pkproc.extractReads(config, args.b, fq_fn, trace=args.t)
     # map reads to pangenome
     pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
     pkproc.mapReads(fq_fn, pg_gfa, args.o)
@@ -239,6 +243,9 @@ def scmd_annotate(args):
             print('{} exists. Skipping alignment to the pangenome'.format(gaf_fn))
             args.r = gaf_fn
         else:
+            if not os.path.isfile(args.f):
+                print('Cannot find file: ' + args.f)
+                exit(1)
             print('Aligning {} to pangenome...'.format(args.f))
             pkproc.mapReads(args.f, args.g, gaf_fn)
             print('Output GAF: ' + gaf_fn)
@@ -297,6 +304,18 @@ def scmd_gafstats(args):
     # print summary stats
     median_rlen = statistics.median(stats['length'])
     print('Median read length: {} bp'.format(median_rlen))
+    print('Maximum read length: {} bp'.format(max(stats['length'])))
+    # N50
+    rlens = list(stats['length'])
+    rlens.sort()
+    rlen_csum = 0
+    rlen_sum = sum(rlens)
+    for rlen in rlens:
+        rlen_csum += rlen
+        if rlen_csum > rlen_sum * .5:
+            print('N50 read length: {} bp'.format(rlen))
+            break
+    # alignment stats
     prop_aln = []
     prop_match = []
     for ii in range(len(stats['length'])):
