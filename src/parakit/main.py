@@ -191,14 +191,13 @@ def scmd_call(args):
 
     # read annotation
     clinvar_fn = pkio.clinvarFile(args.a, config, check_file=True)
-    vedges = pkio.readVariantAnnotation(clinvar_fn, nodes, pos_offset)
 
     # read GAF
     reads = pkio.readGAF(args.r, nodes, verbose=args.t)
 
     # find variants in reads and write output TSV
-    pkvar.findVariants(nodes, vedges, reads,
-                       nmarkers=args.m,
+    pkvar.findVariants(nodes=nodes, annot_fn=clinvar_fn,
+                       reads=reads, nmarkers=args.m,
                        pos_offset=pos_offset,
                        output_tsv=args.o)
 

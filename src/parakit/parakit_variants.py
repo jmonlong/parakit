@@ -1,326 +1,476 @@
-def findVariants(nodes, vedges, reads, nmarkers=10, pos_offset=0,
-                 output_tsv='calls.tsv'):
-    # look for read support for variant edges in vedges
-    var_reads = {}
-    var_reads_ref = {}
-    for readn in reads.path:
-        path = reads.path[readn]
-        # save which variants edges are taken by this read
-        for pos, nod in enumerate(path):
-            if nod in vedges and pos + 1 < len(path) and \
-               path[pos + 1] in vedges[nod]:
-                # found a variant edge
-                for ve in vedges[nod][path[pos + 1]]:
-                    cvid = ve['cvid']
-                    if ve['ref']:
-                        # "non-pathogenic" allele at an interesting site
-                        if cvid not in var_reads_ref:
-                            var_reads_ref[cvid] = []
-                        var_reads_ref[cvid].append(readn)
-                    else:
-                        # either the "pathogenic" allele
-                        if cvid not in var_reads:
-                            var_reads[cvid] = []
-                        var_reads[cvid].append({'read': readn, 'pos': pos + 1})
-    # Looking for isolate variants, e.g. from a short gene conversion event
-    # Test if any covered node is surrounded by marker from module 2
-    print('Looking for isolated known variants...')
-    var_reads_f = {}
-    # for each read, does it traverse each supported variant, yes/no
-    read_sum = {}
-    # check every variant
-    for varid in var_reads:
-        supp_reads = []
-        # for each (read, position) check X markers around
-        for rp in var_reads[varid]:
-            c2_marks = 0
-            c1_marks = 0
-            read = reads.path[rp['read']]
-            # check X markers downstream
-            nmarks = 0
-            pos = rp['pos'] + 1
-            while nmarks < nmarkers / 2 and pos < len(read):
-                if nodes[read[pos]]['class'] == 'c1':
-                    c1_marks += 1
-                    nmarks += 1
-                elif nodes[read[pos]]['class'] == 'c2':
-                    c2_marks += 1
-                    nmarks += 1
+class Variant:
+    def __init__(self, ref_trav=None, alt_trav=None,
+                 ref_seq=None, alt_seq=None, varid=None):
+        # list of reference traversals
+        self.ref_trav = ref_trav
+        self.alt_trav = alt_trav
+        self.ref_seq = ref_seq
+        self.alt_seq = alt_seq
+        self.reads_ref = set()
+        self.reads_alt = set()
+        self.pos = 0
+        self.end = None
+        self.pos_error = None
+        self.copy = None
+        self.varid = varid
+        self.clinvar = None
+
+    def addRefRead(self, readn):
+        self.reads_ref.add(readn)
+
+    def addAltRead(self, readn):
+        self.reads_alt.add(readn)
+
+    def nAltReads(self):
+        return (len(self.reads_alt))
+
+    def toTsv(self, include_headers=False):
+        res = []
+        # potentially include the header
+        headers = ['variant', 'pos', 'end', 'node', 'ref_trav',
+                   'alt_trav', 'alt_seq', 'copy']
+        if include_headers:
+            res.append('\t'.join(headers))
+        # prepare row for this variant
+        fmt = '\t'.join(['{}'] * len(headers))
+        pos = self.pos if self.pos != 0 else 'NA'
+        end = self.end if self.end is not None else self.pos
+        ref_trav = ['_'.join(trav) for trav in self.ref_trav]
+        ref_trav = '-'.join(ref_trav)
+        res_r = fmt.format(self.getVariantID(), pos, end, self.alt_trav[0],
+                           ref_trav, '_'.join(self.alt_trav),
+                           self.alt_seq, self.copy)
+        res.append(res_r)
+        return (res)
+
+    def toReadTsv(self, include_headers=False):
+        res = []
+        # potentially include the header
+        headers = ['read', 'variant', 'pos', 'end', 'node', 'allele', 'sig',
+                   'copy', 'node_end', 'pos_ci']
+        if include_headers:
+            res.append('\t'.join(headers))
+        # prepare one row per read
+        fmt = '\t'.join(['{}'] * len(headers))
+        n_start = self.alt_trav[0]
+        pos = self.pos if self.pos != 0 else 'NA'
+        end = self.end if self.end is not None else self.pos
+        node_end = self.alt_trav[1] if len(self.alt_trav) == 2 else 'NA'
+        pos_ci = self.pos_error if self.pos_error is not None else 'NA'
+        for readn in self.reads_ref:
+            res_r = fmt.format(readn, self.getVariantID(), pos, end, n_start,
+                               'ref', self.clinvar, self.copy,
+                               node_end, pos_ci)
+            res.append(res_r)
+        for readn in self.reads_alt:
+            res_r = fmt.format(readn, self.getVariantID(), pos, end, n_start,
+                               'alt', self.clinvar, self.copy,
+                               node_end, pos_ci)
+            res.append(res_r)
+        return (res)
+
+    def assignCopy(self, nodes):
+        # is it a variant path relative to c1 or c2?
+        c1_balance = 0
+        for node in self.alt_trav:
+            if nodes[node]['class'] == 'c1':
+                c1_balance += 1
+            if nodes[node]['class'] == 'c2':
+                c1_balance += -1
+        # assert c1_balance != 0, "No copy assignment for variant " + self.getVariantID()
+        if c1_balance > 0:
+            self.copy = 'c2'
+        else:
+            self.copy = 'c1'
+
+    def findRefTraversal(self, nodes):
+        ref_paths = [[self.alt_trav[0]]]
+        self.ref_trav = []
+        while len(ref_paths) > 0 and len(ref_paths) < 1000:
+            ref_path = ref_paths.pop()
+            if len(ref_path) > 20:
+                continue
+            for n_next in nodes[ref_path[-1]]['sucs']:
+                if n_next == self.alt_trav[-1]:
+                    self.ref_trav.append(ref_path + [n_next])
+                elif nodes[n_next]['class'] == 'none' or (nodes[n_next]['class'] == 'c2' and self.copy == 'c2') or (nodes[n_next]['class'] == 'c1' and self.copy == 'c1'):
+                    ref_paths.append(ref_path + [n_next])
+
+    def getVariantID(self):
+        if self.varid is None:
+            return ('_'.join(self.alt_trav))
+        else:
+            return (self.varid)
+
+    def findPosition(self, nodes):
+        if self.copy is None:
+            self.assignCopy(nodes)
+        if self.copy == 'c1':
+            self.pos = nodes[self.alt_trav[0]]['rpos_min']
+        else:
+            self.pos = nodes[self.alt_trav[0]]['rpos_max']
+        self.pos += nodes[self.alt_trav[0]]['size']
+
+    def findRefSequence(self, nodes):
+        if self.ref_seq is not None:
+            print("Warning: Overwriting reference sequence for variant " +
+                  self.getVariantID())
+        if self.ref_trav is not None:
+            self.ref_seq = ''
+            if len(self.ref_trav) > 0:
+                for node in self.ref_trav[0][1:-1]:
+                    self.ref_seq += nodes[node]['seq']
+
+    def findAltSequence(self, nodes):
+        if self.alt_seq is not None:
+            print("Warning: Overwriting alternate sequence for variant " +
+                  self.getVariantID())
+        self.alt_seq = ''
+        for node in self.alt_trav[1:-1]:
+            self.alt_seq += nodes[node]['seq']
+
+    def fillInfo(self, nodes):
+        self.assignCopy(nodes)
+        self.findRefTraversal(nodes)
+        self.findPosition(nodes)
+        self.findAltSequence(nodes)
+        self.findRefSequence(nodes)
+
+    def fillFusionInfo(self, nodes):
+        # find the start and end position of a fusion
+        # based on the alt traversal and copy
+        assert self.alt_trav is not None and self.copy is not None, \
+            'ALT traversal and copy information missing for fusion'
+        # extract position on module 1 and 2 for both boundary nodes
+        u1 = nodes[self.alt_trav[0]]['rpos_min']
+        d1 = nodes[self.alt_trav[1]]['rpos_min']
+        u2 = nodes[self.alt_trav[0]]['rpos_max']
+        d2 = nodes[self.alt_trav[1]]['rpos_max']
+        # assign pos as the starting position, so it depends on configuration
+        if self.copy == 'c1':
+            # fusion c1-c2
+            self.pos = round((u1 + d1) / 2)
+            self.end = round((u2 + d2) / 2)
+        elif self.copy == 'c2':
+            # fusion c2-c1
+            self.pos = round((u2 + d2) / 2)
+            self.end = round((u1 + d1) / 2)
+        # error in position is always the same no matter the configuration
+        self.pos_error = round((abs(u1 - d1) + abs(u2 - d2)) / 4)
+
+
+class Fusions:
+    def __init__(self, nmarkers=10):
+        # potential fusion variants (varid -> Variant object)
+        self.variants = {}
+        # number of markers used to decide if a variant is (likely) converted
+        self.nmarkers = nmarkers
+
+    def importReads(self, reads, nodes, support_only=False):
+        # find cycling nodes to split into subreads
+        cyc_nodes = set()
+        for node in nodes:
+            if 'cyc' in nodes[node]['class']:
+                cyc_nodes.add(node)
+        # import each read
+        for readn in reads.path:
+            path = reads.path[readn]
+            # extract marker sequence for each subread
+            subread_to_markers = {}
+            cur_markers = []
+            cur_nodes = []
+            for node in path:
+                if node in cyc_nodes:
+                    if len(cur_nodes) > 2 * self.nmarkers:
+                        # save current subread
+                        sreadn = readn + '_' + str(len(subread_to_markers))
+                        subread_to_markers[sreadn] = {
+                            'markers': cur_markers,
+                            'nodes': cur_nodes
+                        }
+                    cur_markers = []
+                    cur_nodes = []
+                elif nodes[node]['class'] in ['c1', 'c2']:
+                    # this is a marker to record
+                    cur_markers.append(nodes[node]['class'])
+                    cur_nodes.append(node)
+            # import each subread
+            for sreadn in subread_to_markers:
+                self.importSubread(subread_to_markers[sreadn]['markers'],
+                                   subread_to_markers[sreadn]['nodes'],
+                                   sreadn, support_only=support_only)
+
+    def importSubread(self, markers, nodes, sreadn, support_only=False):
+        u_c1 = 0
+        u_c2 = 0
+        d_c1 = markers.count('c1')
+        d_c2 = markers.count('c2')
+        # test for a module switch across the markers by subread
+        for idx, marker in enumerate(markers):
+            # update the counts
+            if marker == 'c1':
+                u_c1 += 1
+                d_c1 += -1
+            if marker == 'c2':
+                u_c2 += 1
+                d_c2 += -1
+            # don't test switch points too close to the ends of the subread
+            if idx < self.nmarkers or idx > len(markers) - self.nmarkers:
+                continue
+            # skip if no switch between this marker and the next
+            # except if we are looking for supporting reads
+            if marker == markers[idx + 1] and not support_only:
+                continue
+            # check proportion of c1/c2 upstream vs downstream
+            fusion_start_copy = None
+            fusion_end_copy = None
+            if u_c1 > 4 * u_c2:
+                fusion_start_copy = 'c1'
+            elif u_c2 > 4 * u_c1:
+                fusion_start_copy = 'c2'
+            if d_c1 > 4 * d_c2:
+                fusion_end_copy = 'c1'
+            elif d_c2 > 4 * d_c1:
+                fusion_end_copy = 'c2'
+            fusid = 'fus_{}_{}'.format(fusion_start_copy, nodes[idx])
+            if marker != fusion_start_copy and not support_only:
+                continue
+            fusion_signal = fusion_start_copy is not None and \
+                fusion_end_copy is not None and \
+                fusion_start_copy != fusion_end_copy
+            if support_only:
+                # annotate support only
+                if fusid in self.variants:
+                    if fusion_signal:
+                        self.variants[fusid].addAltRead(sreadn)
+                    elif self.variants[fusid].copy == fusion_start_copy:
+                        self.variants[fusid].addRefRead(sreadn)
+                # also annotate reference reads on the other copy?
+                other_c = 'c1' if fusion_start_copy == 'c2' else 'c2'
+                fusid2 = 'fus_{}_{}'.format(other_c, nodes[idx])
+                if fusid2 in self.variants and not fusion_signal:
+                    self.variants[fusid2].addRefRead(sreadn)
+            if not support_only and fusion_signal:
+                # looking for new fusion, potentially create a variant
+                if fusid not in self.variants:
+                    self.variants[fusid] = Variant(alt_trav=[nodes[idx],
+                                                             nodes[idx+1]],
+                                                   varid=fusid)
+                    self.variants[fusid].copy = fusion_start_copy
+                self.variants[fusid].addAltRead(sreadn)
+
+    def filterVariants(self):
+        selected_vars = {}
+        # sort by the most supporting reads
+        vars_s = sorted(list(self.variants.keys()),
+                        key=lambda vv: -self.variants[vv].nAltReads())
+        used_reads = set()
+        # assign some (sub)reads
+        for varid in vars_s:
+            supp_reads = set()
+            for readn in self.variants[varid].reads_alt:
+                if readn not in used_reads:
+                    supp_reads.add(readn)
+            if len(supp_reads) >= 3:
+                selected_vars[varid] = self.variants[varid]
+                selected_vars[varid].reads_alt = supp_reads
+                for readn in supp_reads:
+                    used_reads.add(readn)
+        self.variants = selected_vars
+
+    def fillInfo(self, nodes):
+        for varid in self.variants:
+            self.variants[varid].fillFusionInfo(nodes)
+
+
+class ConvertedVariants:
+    def __init__(self, nmarkers=10):
+        # potential converted variants (varid -> Variant object)
+        self.variants = {}
+        # number of markers used to decide if a variant is (likely) converted
+        self.nmarkers = nmarkers
+        # index the position/nodes of the current variant list
+        self.pos_to_varids = {}
+        self.node_to_varids = {}
+
+    def addVariant(self, var):
+        varid = var.getVariantID()
+        self.variants[varid] = var
+        # update the pos/node index
+        if var.pos not in self.pos_to_varids:
+            self.pos_to_varids[var.pos] = []
+        self.pos_to_varids[var.pos].append(varid)
+        if var.alt_trav[0] not in self.node_to_varids:
+            self.node_to_varids[var.alt_trav[0]] = []
+        self.node_to_varids[var.alt_trav[0]].append(varid)
+
+    def decomposePangenome(self, nodes):
+        # check for variant starting at any node
+        for n_start in nodes:
+            # well not any node, only if it's on the reference path
+            if nodes[n_start]['class'] != 'none':
+                continue
+            # try to traverse from that node, looking for variant paths
+            # as long as the assigned reference node (rnode) is the start node
+            cand_paths = [[n_start]]
+            var_paths = []
+            while len(cand_paths) > 0:
+                cur_path = cand_paths.pop()
+                # try to extend the path
+                for n_next in nodes[cur_path[-1]]['sucs']:
+                    if nodes[n_next]['rnode'] == n_start:
+                        cand_paths.append(cur_path + [n_next])
+                        continue
+                    if nodes[n_next]['class'] != 'none' or len(cur_path) == 1:
+                        continue
+                    # it reached the reference path again and
+                    # traversed something before
+                    # check if it's close enough from the starting position
+                    start_dist = min(abs(nodes[n_next]['rpos_min'] -
+                                         nodes[n_start]['rpos_min'] -
+                                         nodes[n_start]['size']),
+                                     abs(nodes[n_next]['rpos_max'] -
+                                         nodes[n_start]['rpos_max'] -
+                                         nodes[n_start]['size']))
+                    if start_dist < 50:
+                        var_paths.append(cur_path + [n_next])
+            # create a Variant object from the variant paths
+            for var_path in var_paths:
+                var = Variant(alt_trav=var_path)
+                var.fillInfo(nodes)
+                if var.ref_trav is not None:
+                    self.addVariant(var)
+
+    def matchAnnotation(self, filen, offset):
+        # read the input tsv file
+        inf = open(filen, 'rt')
+        heads = next(inf).rstrip().split('\t')
+        n_matched = 0
+        for line in inf:
+            # parse the line and get some info
+            line = line.rstrip().split('\t')
+            pos = int(line[heads.index('start')]) - offset
+            ref = line[heads.index('ref')]
+            alt = line[heads.index('alt')]
+            cvid = '{}_{}_{}'.format(line[heads.index('id')],
+                                     line[heads.index('nuc.change')],
+                                     line[heads.index('prot.change')])
+            # if padding, remove it and update position
+            if ref[0] == alt[0]:
+                ref = '' if len(ref) == 1 else ref[1:]
+                alt = '' if len(alt) == 1 else alt[1:]
                 pos += 1
-            # check X markers upstream
-            nmarks = 0
-            pos = rp['pos'] - 1
-            while nmarks < nmarkers / 2 and pos >= 0:
-                if nodes[read[pos]]['class'] == 'c1':
-                    c1_marks += 1
-                    nmarks += 1
-                elif nodes[read[pos]]['class'] == 'c2':
-                    c2_marks += 1
-                    nmarks += 1
-                pos += -1
-            if c2_marks > 3 * c1_marks:
-                supp_reads.append(rp['read'])
-        # we keep cases with at least 3 supporting reads
-        if len(supp_reads) >= 3:
-            var_reads_f[varid] = supp_reads
-            for read in supp_reads:
-                if read not in read_sum:
-                    read_sum[read] = {}
-                read_sum[read][varid] = True
+            # look for a variant starting at that position and
+            # with matching alt sequences
+            if pos not in self.pos_to_varids:
+                # print('W: {} not matched (no variant at {})'.format(cvid, pos))
+                continue
+            for varid in self.pos_to_varids[pos]:
+                if self.variants[varid].alt_seq == alt:
+                    self.variants[varid].clinvar = cvid
+                    n_matched += 1
+            continue
+            # print('W: {} not matched (variants at {} but different alt'
+            #       ' sequence)'.format(cvid, pos))
+        inf.close()
+        print('{} annotated variants matched.'.format(n_matched))
 
-    # to record the two nodes associated with the alt edge of a variant
-    # (for reporting later)
-    var_node = {}
-    # for fusions we'll only look for breakpoint after the ealiest clinvar
-    # variant (minus 1kb say)
-    min_pos_var = []
-    for nod1 in vedges:
-        for nod2 in vedges[nod1]:
-            for ve in vedges[nod1][nod2]:
-                if not ve['ref']:
-                    var_node[ve['cvid']] = [nod1, nod2]
-                min_pos_var.append(nodes[nod1]['rpos_min'])
-    min_pos_var = min(min_pos_var) - 1000
+    def importReads(self, reads, nodes):
+        for readn in reads.path:
+            path = reads.path[readn]
+            # save which variants edges are taken by this read
+            for pos, node in enumerate(path):
+                if pos == len(path) - 1:
+                    # skip if there is no next node
+                    # (the edge is used to match the allele)
+                    continue
+                next_node = path[pos + 1]
+                if node not in self.node_to_varids:
+                    # no variant starts at this node, skip
+                    continue
+                # check if this region could be converted
+                reg_copy = reads.predictLocalCopy(readn, pos + 1,
+                                                  nodes,
+                                                  self.nmarkers)
+                if reg_copy is None:
+                    # we somehow can't tell if we're in c1 or c2
+                    continue
+                # check if any variant matches
+                for varid in self.node_to_varids[node]:
+                    var = self.variants[varid]
+                    # check that it's the appropriate conversion
+                    if reg_copy != var.copy:
+                        continue
+                    # assign to alt allele if first edge matches
+                    if var.alt_trav[1] == next_node:
+                        var.addAltRead(readn)
+                    # assign to ref allele if first edge matches
+                    for ref_trav in var.ref_trav:
+                        if ref_trav[1] == next_node:
+                            var.addRefRead(readn)
 
-    # Looking for deletion/fusion events
-    # Test if any node in module/copy 2 is flanked by markers from
-    # copy 1 upstream, and from copy 2 downstream
+    def filterVariants(self):
+        selected_vars = {}
+        for varid in self.variants:
+            if self.variants[varid].nAltReads() >= 3:
+                selected_vars[varid] = self.variants[varid]
+        self.variants = selected_vars
+
+
+def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
+                 output_tsv='calls.tsv'):
+
+    decomposePangenome(nodes, pos_offset)
+    
+    # look for read support for variant edges in vedges
+    vars = ConvertedVariants(nmarkers)
+    vars.decomposePangenome(nodes)
+    vars.matchAnnotation(annot_fn, pos_offset)
+    vars.importReads(reads, nodes)
+    vars.filterVariants()
+
+    # look for deletions/fusions
     print('Looking for deletion/fusion variants...')
-    # for later: list candidate reads supporting a functional allele
-    # because containing at least one module 2 "window"
-    cand_func_reads = {}
-    # also record all the reads with some fusion signal
-    cand_fus_reads = {}
-    # we'll keep cases with at least 3 supporting reads
-    # we don't want to "discover" the cycle going from module 1 to 2
-    # hence we don't want fusion around the position of the cycle
-    cyc_pos = 0
-    for nod in nodes:
-        if nodes[nod]['class'] == 'cyc_r':
-            cyc_pos = nodes[nod]['rpos_min']
-            break
-    # to record fusion-supporting reads by node start
-    # fus_reads['nod1'] = ['read1', 'read3']
-    fus_reads = {}
-    for readn in reads.path:
-        # prepare a marker profile vector
-        marks_n = []
-        marks_c = []
-        marks_p1 = []
-        marks_p2 = []
-        for ii, nod in enumerate(reads.path[readn]):
-            if nodes[nod]['class'] == 'c1':
-                marks_n.append(nod)
-                marks_c.append('c1')
-                # save the position in module 1 and 2
-                if nodes[nod]['rpos_min'] != nodes[nod]['rpos_min']:
-                    # use pos min and max if different
-                    marks_p1.append(nodes[nod]['rpos_min'])
-                    marks_p2.append(nodes[nod]['rpos_max'])
-                else:
-                    # if they're the same, we're missing the max
-                    marks_p1.append(nodes[nod]['rpos_min'])
-                    # look for the next node with a informative rpos_max
-                    tpos = -1
-                    jj = ii + 1
-                    while jj < len(reads.path[readn]) and tpos == -1:
-                        nodj = reads.path[readn][jj]
-                        if nodes[nodj]['rpos_min'] != nodes[nodj]['rpos_max']:
-                            tpos = nodes[nodj]['rpos_max']
-                        jj += 1
-                    marks_p2.append(tpos)
-            elif nodes[nod]['class'] == 'c2':
-                marks_n.append(nod)
-                marks_c.append('c2')
-                # save the position in module 1 and 2
-                if nodes[nod]['rpos_min'] != nodes[nod]['rpos_min']:
-                    # use pos min and max if different
-                    marks_p1.append(nodes[nod]['rpos_min'])
-                    marks_p2.append(nodes[nod]['rpos_max'])
-                else:
-                    # if they're the same, we're missing the min
-                    marks_p2.append(nodes[nod]['rpos_max'])
-                    # look for the next node with a informative rpos_max
-                    tpos = -1
-                    jj = ii - 1
-                    while jj > 0 and tpos == -1:
-                        nodj = reads.path[readn][jj]
-                        if nodes[nodj]['rpos_min'] != nodes[nodj]['rpos_max']:
-                            tpos = nodes[nodj]['rpos_min']
-                        jj += -1
-                    marks_p1.append(tpos)
-        # skip if not enough markers for the test
-        if len(marks_n) < nmarkers * 2:
-            continue
-        # compute a score to measure how much the flank are c1-c2 specific
-        for ii in range(nmarkers, len(marks_n) - nmarkers):
-            # test for a switch c1 -> c2
-            c1_n = marks_c[(ii-nmarkers+1):(ii+1)].count('c1')
-            c2_n = marks_c[(ii+1):(ii+nmarkers+1)].count('c2')
-            score = min(c2_n / nmarkers, c1_n / nmarkers)
-            # save any position over the minimum score threshold
-            if score > .8:
-                # save info about the breakpoint
-                fus_info = {'node_l': marks_n[ii],
-                            'pos_l_1': marks_p1[ii],
-                            'pos_l_2': marks_p2[ii],
-                            'node_u': marks_n[ii+1],
-                            'pos_u_1': marks_p1[ii+1],
-                            'pos_u_2': marks_p2[ii+1],
-                            'readn': readn}
-                if marks_n[ii] not in fus_reads:
-                    fus_reads[marks_n[ii]] = []
-                fus_reads[marks_n[ii]].append(fus_info)
-                cand_fus_reads[readn] = True
-            # test for a switch c2 -> c1
-            c1_n = marks_c[(ii-nmarkers+1):(ii+1)].count('c2')
-            c2_n = marks_c[(ii+1):(ii+nmarkers+1)].count('c1')
-            score = min(c2_n / nmarkers, c1_n / nmarkers)
-            # save any position over the minimum score threshold
-            if score > .8:
-                # save info about the breakpoint
-                fus_info = {'node_l': marks_n[ii],
-                            'pos_l_1': marks_p2[ii],
-                            'pos_l_2': marks_p1[ii],
-                            'node_u': marks_n[ii+1],
-                            'pos_u_1': marks_p2[ii+1],
-                            'pos_u_2': marks_p1[ii+1],
-                            'readn': readn}
-                if marks_n[ii] not in fus_reads:
-                    fus_reads[marks_n[ii]] = []
-                fus_reads[marks_n[ii]].append(fus_info)
-                cand_fus_reads[readn] = True
-            # mark reads with no signal there
-            if c2_n / nmarkers > .5 and c1_n / nmarkers < .5 and \
-               nodes[marks_n[ii]]['rpos_min'] > min_pos_var:
-                cand_func_reads[readn] = True
-    # filter candidate fusions
-    # keep nodes in range and one per read
-    # (starting with the ones supported by the most reads)
-    fus_reads_f = {}
-    # sort nodes with some read support by number of reads
-    fusnodes = sorted(list(fus_reads.keys()), key=lambda nod: -len(fus_reads[nod]))
-    used_reads = {}
-    for fusnod in fusnodes:
-        # skip if node out of range
-        if (nodes[fusnod]['rpos_min'] < min_pos_var) or \
-           (nodes[fusnod]['rpos_min'] > cyc_pos - 100):
-            continue
-        # check that enough unused supporting reads
-        fus_sup_reads = 0
-        for fus_info in fus_reads[fusnod]:
-            if fus_info['readn'] not in used_reads:
-                fus_sup_reads += 1
-        if fus_sup_reads >= 3:
-            # save fusion
-            # fusion name
-            fus_n = 'FUS_{}'.format(fusnod)
-            # lower and upper bounds of the confidence interval
-            pos_l_1 = []
-            pos_l_2 = []
-            pos_u_1 = []
-            pos_u_2 = []
-            node_u = []
-            for fus_info in fus_reads[fusnod]:
-                if fus_info['pos_l_1'] != -1:
-                    pos_l_1.append(fus_info['pos_l_1'])
-                if fus_info['pos_l_2'] != -1:
-                    pos_l_2.append(fus_info['pos_l_2'])
-                if fus_info['pos_u_1'] != -1:
-                    pos_u_1.append(fus_info['pos_u_1'])
-                if fus_info['pos_u_2'] != -1:
-                    pos_u_2.append(fus_info['pos_u_2'])
-                node_u.append(fus_info['node_u'])
-            pos_l_1 = min(pos_l_1)
-            pos_l_2 = min(pos_l_2)
-            pos_u_1 = max(pos_u_1)
-            pos_u_2 = max(pos_u_2)
-            node_u = max(node_u)
-            # used to report fusions and other variants
-            var_node[fus_n] = [fusnod, fusnod]
-            # save info
-            fus_reads_f[fus_n] = {'pos_l_1': pos_l_1,
-                                  'pos_l_2': pos_l_2,
-                                  'pos_u_1': pos_u_1,
-                                  'pos_u_2': pos_u_2,
-                                  'node_u': node_u}
-            for fus_info in fus_reads[fusnod]:
-                readn = fus_info['readn']
-                # mark reads as "used"
-                used_reads[readn] = True
-                # remember that this read support this fusion
-                if readn not in read_sum:
-                    read_sum[readn] = {}
-                read_sum[readn][fus_n] = True
+    fusions = Fusions()
+    fusions.importReads(reads, nodes)
+    fusions.importReads(reads, nodes, support_only=True)
+    fusions.filterVariants()
+    fusions.fillInfo(nodes)
 
-    # looking for reads supporting a normal/functional allele
-    # reads mostly from module 2 and with none of the
-    # candidate variants identified above
-    print('Looking for reads supporting a functional gene allele...')
-    # list variants identified above (both clinvar and fusions)
-    varids = {}
-    for readn in read_sum:
-        for varid in read_sum[readn]:
-            varids[varid] = True
-    # mark reads supporting the ref allele
-    for varid in varids:
-        if varid in var_reads_ref:
-            for readn in var_reads_ref[varid]:
-                # and were not supporting a pathogenic variant
-                if readn not in read_sum:
-                    cand_func_reads[readn] = True
+    # merge variants and print
+    all_vars = vars.variants
+    for varid in fusions.variants:
+        all_vars[varid] = fusions.variants[varid]
 
-    # print read support summary
-    print("Covered variants and their supporting reads:\n")
-    # order variants by position
-    var_names = sorted(list(var_reads_f) + list(fus_reads_f),
-                       key=lambda k: nodes[var_node[k][0]]['rpos_max'])
-    # prepare TSV output
-    for_tsv = ['\t'.join(['read', 'variant', 'node', 'allele', 'node_u',
-                          'pos_l_1', 'pos_l_2', 'pos_u_1', 'pos_u_2'])]
-    for_tsv_nas = '\t'.join(['NA']*5)
-    printed_reads = {}
-    for read in list(read_sum.keys()) + list(cand_func_reads.keys()):
-        # don't write multiple time the same read
-        if read in printed_reads:
-            continue
-        to_print = read + '\t'
-        for varid in var_names:
-            for_tsv_r = '\t'.join([read, varid, var_node[varid][1]])
-            if read not in read_sum or varid not in read_sum[read]:
-                # here check if we think the reads supports a ref allele
-                ref_supp = varid in var_reads_ref and \
-                    read in var_reads_ref[varid]
-                ref_supp |= 'FUS' in varid and \
-                    read in cand_func_reads and \
-                    read not in cand_fus_reads
-                # check if the read support a reference node for this variant
-                if ref_supp:
-                    # if so, print ----
-                    to_print += '-' * len(varid) + '\t'
-                    for_tsv.append(for_tsv_r + '\tref\t' + for_tsv_nas)
-                else:
-                    # if not, print a gap
-                    to_print += ' ' * len(varid) + '\t'
-                    for_tsv.append(for_tsv_r + '\tNA\t' + for_tsv_nas)
-            else:
-                # the read goes through the variant, print the variant name
-                to_print += varid + '\t'
-                if varid in fus_reads_f:
-                    # it's a fusion, let's also print breakpoint information
-                    fus_info = fus_reads_f[varid]
-                    fus_bkpt = [fus_info['node_u'],
-                                fus_info['pos_l_1'] + pos_offset,
-                                fus_info['pos_l_2'] + pos_offset,
-                                fus_info['pos_u_1'] + pos_offset,
-                                fus_info['pos_u_2'] + pos_offset]
-                    fus_bkpt = '\t'.join([str(ii) for ii in fus_bkpt])
-                    for_tsv.append(for_tsv_r + '\talt\t' + fus_bkpt)
-                else:
-                    for_tsv.append(for_tsv_r + '\talt\t' + for_tsv_nas)
-        print(to_print)
-        printed_reads[read] = True
-    print()
+    # sort them by position
+    var_ids = sorted(list(all_vars), key=lambda vid: all_vars[vid].pos)
+    inc_headers = True
+    for_tsv = []
+    for vid in var_ids:
+        # print or prepare the tsv output for this variant
+        for_tsv += all_vars[vid].toReadTsv(inc_headers)
+        inc_headers = False
+
+    # write TSV output
+    print('Writing summary in ' + output_tsv + ' TSV...')
+    with open(output_tsv, 'wt') as outf:
+        outf.write('\n'.join(for_tsv) + '\n')
+
+
+def decomposePangenome(nodes, pos_offset=0, output_tsv='variants.tsv'):
+    # look for read support for variant edges in vedges
+    vars = ConvertedVariants()
+    vars.decomposePangenome(nodes)
+    vars = vars.variants
+
+    # sort them by position
+    var_ids = sorted(list(vars), key=lambda vid: vars[vid].pos)
+    inc_headers = True
+    for_tsv = []
+    for vid in var_ids:
+        # print or prepare the tsv output for this variant
+        for_tsv += vars[vid].toTsv(inc_headers)
+        inc_headers = False
 
     # write TSV output
     print('Writing summary in ' + output_tsv + ' TSV...')

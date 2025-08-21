@@ -231,6 +231,39 @@ class Reads:
                 rp.addReadPosList(self.edge_to_readpos[ename])
             return (rp)
 
+    def predictLocalCopy(self, read_name, var_pos, nodes, nmarkers):
+        c2_marks = 0
+        c1_marks = 0
+        read = self.path[read_name]
+        # check X markers downstream
+        nmarks = 0
+        pos = var_pos + 1
+        while nmarks < nmarkers / 2 and pos < len(read):
+            if nodes[read[pos]]['class'] == 'c1':
+                c1_marks += 1
+                nmarks += 1
+            elif nodes[read[pos]]['class'] == 'c2':
+                c2_marks += 1
+                nmarks += 1
+            pos += 1
+        # check X markers upstream
+        nmarks = 0
+        pos = var_pos - 1
+        while nmarks < nmarkers / 2 and pos >= 0:
+            if nodes[read[pos]]['class'] == 'c1':
+                c1_marks += 1
+                nmarks += 1
+            elif nodes[read[pos]]['class'] == 'c2':
+                c2_marks += 1
+                nmarks += 1
+            pos += -1
+        if c2_marks > 3 * c1_marks:
+            return ('c2')
+        elif c1_marks > 3 * c2_marks:
+            return ('c1')
+        else:
+            return (None)
+
     def print(self):
         nedge = 0
         nreads = {}
