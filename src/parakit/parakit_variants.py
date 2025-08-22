@@ -517,7 +517,7 @@ def readVariantCalls(filen):
             if sig != 'None':
                 var.clinvar = sig
             var.alt_trav = [line[heads.index('node')]]
-            node_end = int(line[heads.index('end')])
+            node_end = line[heads.index('node_end')]
             if node_end != 'NA':
                 var.alt_trav.append(node_end)
             var.copy = line[heads.index('copy')]
