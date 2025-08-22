@@ -330,15 +330,68 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
 
     # update node info with path cover
     refpos = 0
+    cycled = False
     for nod in ref:
         ninfo[nod]['ref'] += 1
         # also minimum/maximum position on reference
-        if ninfo[nod]['rpos_min'] == -1:
+        if ninfo[nod]['rpos_min'] == -1 and not cycled:
+            # first time the reference traverses this node
             ninfo[nod]['rpos_min'] = refpos
         else:
-            ninfo[nod]['rpos_min'] = min(refpos, ninfo[nod]['rpos_min'])
-        ninfo[nod]['rpos_max'] = max(refpos, ninfo[nod]['rpos_max'])
+            # second time, fill rpos_max
+            ninfo[nod]['rpos_max'] = refpos
+            cycled = True
         refpos += ninfo[nod]['size']
+    # assign position on the flanks
+    ii = 0
+    while ninfo[ref[ii]]['rpos_max'] == -1:
+        if ninfo[ref[ii]]['rpos_min'] != 1:
+            ninfo[ref[ii]]['rpos_max'] = ninfo[ref[ii]]['rpos_min']
+        else:
+            break
+        ii += 1
+    ii = len(ref) - 1
+    while ninfo[ref[ii]]['rpos_min'] == -1:
+        if ninfo[ref[ii]]['rpos_max'] != 1:
+            ninfo[ref[ii]]['rpos_min'] = ninfo[ref[ii]]['rpos_max']
+        else:
+            break
+        ii += -1
+
+    # approximate ref position on non-reference paths as
+    # the position of nearest ref node
+    rpos_min = {}
+    rpos_max = {}
+    for pname in paths:
+        cur_min = 0
+        cur_max = None
+        for nod in paths[pname]:
+            if ninfo[nod]['rpos_min'] != -1:
+                # if current node has a ref position
+                # update current value
+                cur_min = ninfo[nod]['rpos_min'] + ninfo[nod]['size']
+            else:
+                # if not save the current value
+                if nod not in rpos_min:
+                    rpos_min[nod] = []
+                rpos_min[nod].append(cur_min)
+            # same for maximum ref position
+            if ninfo[nod]['rpos_max'] != -1:
+                cur_max = ninfo[nod]['rpos_max'] + ninfo[nod]['size']
+            elif cur_max is not None:
+                if nod not in rpos_max:
+                    rpos_max[nod] = []
+                rpos_max[nod].append(cur_max)
+    # use the median of the approximated positions for each node
+    for nod in ninfo:
+        if ninfo[nod]['rpos_min'] == -1 and \
+           nod in rpos_min:
+            if nod == '1279':
+                print(ninfo[nod])
+            ninfo[nod]['rpos_min'] = int(statistics.median(rpos_min[nod]))
+        if ninfo[nod]['rpos_max'] == -1 and \
+           nod in rpos_max:
+            ninfo[nod]['rpos_max'] = int(statistics.median(rpos_max[nod]))
 
     # flag nodes contributing to the cycle edge
     # (end of copy 2 to beginning of copy 1)
@@ -374,38 +427,6 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
     ninfo[cyc_start]['class'] = 'cyc_r'
     print('Guessing that the cycling happens between {} and '
           '{}'.format(cyc_start, cyc_end))
-
-    # approximate ref position on non-reference paths as
-    # the position of nearest ref node
-    rpos_min = {}
-    rpos_max = {}
-    for pname in paths:
-        cur_min = 0
-        cur_max = 0
-        for nod in paths[pname]:
-            if ninfo[nod]['rpos_min'] != -1:
-                # if current node has a ref position
-                # update current value
-                cur_min = ninfo[nod]['rpos_min'] + ninfo[nod]['size']
-            else:
-                # if not save the current value
-                if nod not in rpos_min:
-                    rpos_min[nod] = []
-                rpos_min[nod].append(cur_min)
-            # same for maximum ref position
-            if ninfo[nod]['rpos_max'] != -1:
-                cur_max = ninfo[nod]['rpos_max'] + ninfo[nod]['size']
-            else:
-                if nod not in rpos_max:
-                    rpos_max[nod] = []
-                rpos_max[nod].append(cur_max)
-    # use the median of the approximated positions for each node
-    for nod in ninfo:
-        if ninfo[nod]['rpos_min'] == -1 and \
-           ninfo[nod]['rpos_max'] == -1 and \
-           nod in rpos_min:
-            ninfo[nod]['rpos_min'] = int(statistics.median(rpos_min[nod]))
-            ninfo[nod]['rpos_max'] = int(statistics.median(rpos_max[nod]))
 
     # count how many time a node is traversed by modules 1 or 2
     if guess_modules:
