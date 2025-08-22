@@ -21,109 +21,6 @@ pars_construct.add_argument('-t', default=4, type=int,
                             help='number of threads to use')
 pars_construct.set_defaults(scmd='construct')
 
-# map subcommand: map reads to the pangenome
-pars_map = spars.add_parser('map',
-                            help='map reads to the pangenome')
-pars_map.add_argument('-j', help='config JSON file', required=True)
-pars_map.add_argument('-g', help='input GFA pangenome', default='')
-pars_map.add_argument('-b', help='input (indexed) BAM file', required=True)
-pars_map.add_argument('-o', help='output GAF file', required=True)
-pars_map.add_argument('-t', help='debug trace mode', action='store_true')
-pars_map.set_defaults(scmd='map')
-
-# call subcommand: calls variant by aggregating read support
-pars_call = spars.add_parser('call',
-                             help='call variants by aggregating read support')
-pars_call.add_argument('-j', help='config JSON file', required=True)
-pars_call.add_argument('-n', help='node information', default='')
-pars_call.add_argument('-r', help='input alignments in GAF', required=True)
-pars_call.add_argument('-g', help='input GFA pangenome', default='')
-pars_call.add_argument('-a', help='annotation file (e.g. from ClinVar)',
-                       default='')
-pars_call.add_argument('-m', help='number of markers checked around the SNPs',
-                       default=20, type=int)
-pars_call.add_argument('-o', help='output TSV', required=True)
-pars_call.add_argument('-t', help='debug trace mode', action='store_true')
-pars_call.set_defaults(scmd='call')
-
-# diplotype subcommand: find the best pair of paths by aggregating read support
-pars_diplotype = spars.add_parser('diplotype',
-                                  help='find diplotype best supported by reads')
-pars_diplotype.add_argument('-j', help='config JSON file', default='')
-pars_diplotype.add_argument('-n', help='node information', default='')
-pars_diplotype.add_argument('-g', help='input GFA pangenome', default='')
-pars_diplotype.add_argument('-r', help='input alignments in GAF', required=True)
-pars_diplotype.add_argument('-o', help='output TSV prefix', required=True)
-pars_diplotype.add_argument('-c', default=3, type=float,
-                            help='minimum read support for subread clustering.')
-pars_diplotype.add_argument('-m', help='maximum number of subread clusters '
-                            'and haplotype to consider (comma-separated). '
-                            'Default: "50,50"',
-                            default='50,50')
-pars_diplotype.add_argument('-t', help='debug trace mode', action='store_true')
-pars_diplotype.set_defaults(scmd='diplotype')
-
-# annotate subcommand: annotate sequence(s) from a FASTA file
-pars_annotate = spars.add_parser('annotate',
-                                 help='annotate sequence(s) from a FASTA file')
-pars_annotate.add_argument('-j', help='config JSON file', required=True)
-pars_annotate.add_argument('-n', help='node information', default='')
-pars_annotate.add_argument('-g', help='input GFA pangenome', default='')
-pars_annotate.add_argument('-f', help='input fasta file', default='')
-pars_annotate.add_argument('-r', help='input alignments in GAF', default='')
-pars_annotate.add_argument('-p', help='annotate the paths in the GFA',
-                           action='store_true')
-pars_annotate.add_argument('-o', help='output PDF file',
-                           default='parakit.viz.pdf')
-pars_annotate.add_argument('-e', help='input genome element annotation TSV',
-                           default='')
-pars_annotate.add_argument('-s', default='pangenome',
-                           help='Optional. Scale for the x-axis. Either pangenome or genome. ')
-pars_annotate.add_argument('-t', help='debug trace mode', action='store_true')
-pars_annotate.set_defaults(scmd='annotate')
-
-# viz subcommand: make different graphs of the results
-pars_viz = spars.add_parser('viz', help='visualize the results')
-pars_viz.add_argument('-v', help='visualization mode: allele_support, calls, diplotype, all, all_small',
-                      default='all_small')
-pars_viz.add_argument('-j', help='config JSON file', required=True)
-pars_viz.add_argument('-n', help='node information', default='')
-pars_viz.add_argument('-e', help='input genome element annotation TSV',
-                      default='')
-pars_viz.add_argument('-r', default='', help='input alignments in GAF')
-pars_viz.add_argument('-c', help='calls TSV', default='')
-pars_viz.add_argument('-d', help='diplotype paths, sorted', default='')
-pars_viz.add_argument('-p', help='haplotype paths information', default='')
-pars_viz.add_argument('-l', help='a label to use as title of the graphs.',
-                      default='')
-pars_viz.add_argument('-m', help='maximum number of supporting reads to '
-                      'show in graph', default=3)
-pars_viz.add_argument('-o', help='output PDF file', default='parakit.viz.pdf')
-pars_viz.add_argument('-S', help='Optional. R script to run instead of '
-                      'the one provided.', default='')
-pars_viz.add_argument('-s', default='pangenome',
-                      help='Optional. Scale for the x-axis. Either pangenome or genome. ')
-pars_viz.add_argument('-t', help='debug trace mode', action='store_true')
-pars_viz.set_defaults(scmd='viz')
-
-# copy subcommand: estimate the copy number of the modules
-pars_copy = spars.add_parser('copy',
-                             help='estimate the copy number of the modules')
-pars_copy.add_argument('-j', help='config JSON file', required=True)
-pars_copy.add_argument('-n', help='node information', default='')
-pars_copy.add_argument('-r', default='', help='input alignments in GAF')
-pars_copy.set_defaults(scmd='copy')
-
-# gafstats subcommand: estimate the copy number of the modules
-pars_gafstats = spars.add_parser('gafstats',
-                                 help='compute basis stats from a GAF')
-pars_gafstats.add_argument('-r', required=True, help='input alignments in GAF')
-pars_gafstats.add_argument('-j', help='config JSON file', required=True)
-pars_gafstats.add_argument('-n', help='node information', default='')
-pars_gafstats.add_argument('-o', help='Optional output TSV file', default='')
-pars_gafstats.set_defaults(scmd='gafstats')
-
-
 def scmd_construct(args):
     # assumes a 'seqs' directory exists TODO
     # read config json file
@@ -157,6 +54,16 @@ def scmd_construct(args):
     print('Node information: ' + node_tsv)
 
 
+# map subcommand: map reads to the pangenome
+pars_map = spars.add_parser('map',
+                            help='map reads to the pangenome')
+pars_map.add_argument('-j', help='config JSON file', required=True)
+pars_map.add_argument('-g', help='input GFA pangenome', default='')
+pars_map.add_argument('-b', help='input (indexed) BAM file', required=True)
+pars_map.add_argument('-o', help='output GAF file', required=True)
+pars_map.add_argument('-t', help='debug trace mode', action='store_true')
+pars_map.set_defaults(scmd='map')
+
 def scmd_map(args):
     # assumes a 'seqs' directory exists TODO
     # read config json file
@@ -172,6 +79,22 @@ def scmd_map(args):
     pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
     pkproc.mapReads(fq_fn, pg_gfa, args.o)
     print('Output GAF: ' + args.o)
+
+
+# call subcommand: calls variant by aggregating read support
+pars_call = spars.add_parser('call',
+                             help='call variants by aggregating read support')
+pars_call.add_argument('-j', help='config JSON file', required=True)
+pars_call.add_argument('-n', help='node information', default='')
+pars_call.add_argument('-r', help='input alignments in GAF', required=True)
+pars_call.add_argument('-g', help='input GFA pangenome', default='')
+pars_call.add_argument('-a', help='annotation file (e.g. from ClinVar)',
+                       default='')
+pars_call.add_argument('-m', help='number of markers checked around the SNPs',
+                       default=20, type=int)
+pars_call.add_argument('-o', help='output TSV', required=True)
+pars_call.add_argument('-t', help='debug trace mode', action='store_true')
+pars_call.set_defaults(scmd='call')
 
 
 def scmd_call(args):
@@ -202,6 +125,69 @@ def scmd_call(args):
                        output_tsv=args.o)
 
 
+# call subcommand: calls variant by aggregating read support
+pars_filtercalls = spars.add_parser('filtercalls',
+                                    help='filter called variants')
+pars_filtercalls.add_argument('-j', help='config JSON file', required=True)
+pars_filtercalls.add_argument('-n', help='node information', default='')
+pars_filtercalls.add_argument('-c', help='calls TSV', required=True)
+pars_filtercalls.add_argument('-r', default=None,
+                              help='region (START-END positions)')
+pars_filtercalls.add_argument('-m', default=None,
+                              help='the module of interest (1 or 2)')
+pars_filtercalls.add_argument('-a', action='store_true',
+                              help='matched with ClinVar variants')
+pars_filtercalls.add_argument('-f', action='store_true',
+                              help='fusion variants')
+pars_filtercalls.add_argument('-o', help='output TSV', required=True)
+pars_filtercalls.set_defaults(scmd='filtercalls')
+
+
+def scmd_filtercalls(args):
+    # read config json file
+    config = json.load(open(args.j, 'rt'))
+    # get offset from config file
+    c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
+    pos_offset += 1
+
+    # load node info
+    node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
+    nodes = pkio.readNodeInfo(node_fn)
+
+    # parse region
+    start_pos = None
+    end_pos = None
+    if args.r is not None:
+        reg = args.r.replace(',', '').split('-')
+        start_pos = int(reg[0])
+        end_pos = int(reg[1])
+
+    # find variants in reads and write output TSV
+    pkvar.filterVariants(nodes=nodes, calls_fn=args.c,
+                         module=args.m, annotated_only=args.a,
+                         fusion_only=args.f,
+                         start_pos=start_pos, end_pos=end_pos,
+                         output_tsv=args.o)
+
+
+# diplotype subcommand: find the best pair of paths by aggregating read support
+pars_diplotype = spars.add_parser('diplotype',
+                                  help='find diplotype best supported by reads')
+pars_diplotype.add_argument('-j', help='config JSON file', default='')
+pars_diplotype.add_argument('-n', help='node information', default='')
+pars_diplotype.add_argument('-g', help='input GFA pangenome', default='')
+pars_diplotype.add_argument('-r', help='input alignments in GAF', required=True)
+pars_diplotype.add_argument('-o', help='output TSV prefix', required=True)
+pars_diplotype.add_argument('-c', default=3, type=float,
+                            help='minimum read support for subread clustering.')
+pars_diplotype.add_argument('-m', help='maximum number of subread clusters '
+                            'and haplotype to consider (comma-separated). '
+                            'Default: "50,50"',
+                            default='50,50')
+pars_diplotype.add_argument('-t', help='debug trace mode', action='store_true')
+pars_diplotype.set_defaults(scmd='diplotype')
+
+
 def scmd_diplotype(args):
     # read config json file
     config = {}
@@ -224,6 +210,26 @@ def scmd_diplotype(args):
     pkio.writePathsInfo(paths_res, nodes,
                         stats_fn=args.o + '.paths-stats.tsv',
                         info_fn=args.o + '.paths-info.tsv')
+
+
+# annotate subcommand: annotate sequence(s) from a FASTA file
+pars_annotate = spars.add_parser('annotate',
+                                 help='annotate sequence(s) from a FASTA file')
+pars_annotate.add_argument('-j', help='config JSON file', required=True)
+pars_annotate.add_argument('-n', help='node information', default='')
+pars_annotate.add_argument('-g', help='input GFA pangenome', default='')
+pars_annotate.add_argument('-f', help='input fasta file', default='')
+pars_annotate.add_argument('-r', help='input alignments in GAF', default='')
+pars_annotate.add_argument('-p', help='annotate the paths in the GFA',
+                           action='store_true')
+pars_annotate.add_argument('-o', help='output PDF file',
+                           default='parakit.viz.pdf')
+pars_annotate.add_argument('-e', help='input genome element annotation TSV',
+                           default='')
+pars_annotate.add_argument('-s', default='pangenome',
+                           help='Optional. Scale for the x-axis. Either pangenome or genome. ')
+pars_annotate.add_argument('-t', help='debug trace mode', action='store_true')
+pars_annotate.set_defaults(scmd='annotate')
 
 
 def scmd_annotate(args):
@@ -262,6 +268,31 @@ def scmd_annotate(args):
     pkproc.runRscript(script_path, args)
 
 
+# viz subcommand: make different graphs of the results
+pars_viz = spars.add_parser('viz', help='visualize the results')
+pars_viz.add_argument('-v', help='visualization mode: allele_support, calls, diplotype, all, all_small',
+                      default='all_small')
+pars_viz.add_argument('-j', help='config JSON file', required=True)
+pars_viz.add_argument('-n', help='node information', default='')
+pars_viz.add_argument('-e', help='input genome element annotation TSV',
+                      default='')
+pars_viz.add_argument('-r', default='', help='input alignments in GAF')
+pars_viz.add_argument('-c', help='calls TSV', default='')
+pars_viz.add_argument('-d', help='diplotype paths, sorted', default='')
+pars_viz.add_argument('-p', help='haplotype paths information', default='')
+pars_viz.add_argument('-l', help='a label to use as title of the graphs.',
+                      default='')
+pars_viz.add_argument('-m', help='maximum number of supporting reads to '
+                      'show in graph', default=3)
+pars_viz.add_argument('-o', help='output PDF file', default='parakit.viz.pdf')
+pars_viz.add_argument('-S', help='Optional. R script to run instead of '
+                      'the one provided.', default='')
+pars_viz.add_argument('-s', default='pangenome',
+                      help='Optional. Scale for the x-axis. Either pangenome or genome. ')
+pars_viz.add_argument('-t', help='debug trace mode', action='store_true')
+pars_viz.set_defaults(scmd='viz')
+
+
 def scmd_viz(args):
     # read config json file
     config = json.load(open(args.j, 'rt'))
@@ -278,6 +309,15 @@ def scmd_viz(args):
     return (True)
 
 
+# copy subcommand: estimate the copy number of the modules
+pars_copy = spars.add_parser('copy',
+                             help='estimate the copy number of the modules')
+pars_copy.add_argument('-j', help='config JSON file', required=True)
+pars_copy.add_argument('-n', help='node information', default='')
+pars_copy.add_argument('-r', default='', help='input alignments in GAF')
+pars_copy.set_defaults(scmd='copy')
+
+
 def scmd_copy(args):
     # read config json file
     config = json.load(open(args.j, 'rt'))
@@ -289,6 +329,16 @@ def scmd_copy(args):
     reads = pkio.readGAF(args.r, nodes)
     pkvar.estimateCopyNumber(nodes, reads)
     return (True)
+
+
+# gafstats subcommand: estimate the copy number of the modules
+pars_gafstats = spars.add_parser('gafstats',
+                                 help='compute basis stats from a GAF')
+pars_gafstats.add_argument('-r', required=True, help='input alignments in GAF')
+pars_gafstats.add_argument('-j', help='config JSON file', required=True)
+pars_gafstats.add_argument('-n', help='node information', default='')
+pars_gafstats.add_argument('-o', help='Optional output TSV file', default='')
+pars_gafstats.set_defaults(scmd='gafstats')
 
 
 def scmd_gafstats(args):
@@ -347,6 +397,8 @@ def main():
         scmd_map(args)
     elif args.scmd == 'call':
         scmd_call(args)
+    elif args.scmd == 'filtercalls':
+        scmd_filtercalls(args)
     elif args.scmd == 'diplotype':
         scmd_diplotype(args)
     elif args.scmd == 'viz':

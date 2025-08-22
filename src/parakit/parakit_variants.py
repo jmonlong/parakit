@@ -24,6 +24,12 @@ class Variant:
     def nAltReads(self):
         return (len(self.reads_alt))
 
+    def getEnd(self):
+        if self.end is not None:
+            return (self.end)
+        else:
+            return (self.pos)
+
     def toTsv(self, include_headers=False):
         res = []
         # potentially include the header
@@ -34,7 +40,7 @@ class Variant:
         # prepare row for this variant
         fmt = '\t'.join(['{}'] * len(headers))
         pos = self.pos if self.pos != 0 else 'NA'
-        end = self.end if self.end is not None else self.pos
+        end = self.getEnd()
         ref_trav = ['_'.join(trav) for trav in self.ref_trav]
         ref_trav = '-'.join(ref_trav)
         res_r = fmt.format(self.getVariantID(), pos, end, self.alt_trav[0],
@@ -54,7 +60,7 @@ class Variant:
         fmt = '\t'.join(['{}'] * len(headers))
         n_start = self.alt_trav[0]
         pos = self.pos if self.pos != 0 else 'NA'
-        end = self.end if self.end is not None else self.pos
+        end = self.getEnd()
         node_end = self.alt_trav[1] if len(self.alt_trav) == 2 else 'NA'
         pos_ci = self.pos_error if self.pos_error is not None else 'NA'
         for readn in self.reads_ref:
@@ -157,6 +163,11 @@ class Variant:
             self.end = round((u1 + d1) / 2)
         # error in position is always the same no matter the configuration
         self.pos_error = round((abs(u1 - d1) + abs(u2 - d2)) / 4)
+
+    def offsetPosition(self, offset):
+        self.pos += offset
+        if self.end is not None:
+            self.end += offset
 
 
 class Fusions:
@@ -282,6 +293,10 @@ class Fusions:
         for varid in self.variants:
             self.variants[varid].fillFusionInfo(nodes)
 
+    def offsetPositions(self, offset):
+        for varid in self.variants:
+            self.variants[varid].offsetPosition(offset)
+
 
 class ConvertedVariants:
     def __init__(self, nmarkers=10):
@@ -399,16 +414,39 @@ class ConvertedVariants:
                 for varid in self.node_to_varids[node]:
                     var = self.variants[varid]
                     # check that it's the appropriate conversion
-                    if reg_copy != var.copy:
+                    if reg_copy != self.variants[varid].copy:
                         continue
-                    # assign to alt allele if first edge matches
-                    if var.alt_trav[1] == next_node:
-                        var.addAltRead(readn)
-                    # assign to ref allele if first edge matches
-                    for ref_trav in var.ref_trav:
-                        if ref_trav[1] == next_node:
-                            var.addRefRead(readn)
+                    self.checkReadSupport(varid, path[pos:], readn)
 
+    def checkReadSupport(self, varid, read, readn):
+        var = self.variants[varid]
+        # assign to alt allele if first edge matches
+        alt_support = True
+        node_ii = 0
+        while node_ii < len(read) and node_ii < len(var.alt_trav):
+            if var.alt_trav[node_ii] != read[node_ii]:
+                alt_support = False
+                break
+            node_ii += 1
+        # assign to ref allele if first edge matches
+        ref_support = False
+        for ref_trav in var.ref_trav:
+            ref_support_c = True
+            node_ii = 0
+            while node_ii < len(read) and node_ii < len(ref_trav):
+                if ref_trav[node_ii] != read[node_ii]:
+                    ref_support_c = False
+                    break
+                node_ii += 1
+            if ref_support_c:
+                ref_support = True
+                break
+        # assign if unambiguous
+        if alt_support and not ref_support:
+            var.addAltRead(readn)
+        elif ref_support and not alt_support:
+            var.addRefRead(readn)
+    
     def filterVariants(self):
         selected_vars = {}
         for varid in self.variants:
@@ -416,18 +454,21 @@ class ConvertedVariants:
                 selected_vars[varid] = self.variants[varid]
         self.variants = selected_vars
 
+    def offsetPositions(self, offset):
+        for varid in self.variants:
+            self.variants[varid].offsetPosition(offset)
+
 
 def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
                  output_tsv='calls.tsv'):
-
-    decomposePangenome(nodes, pos_offset)
-    
+    # decomposePangenome(nodes, pos_offset)
     # look for read support for variant edges in vedges
     vars = ConvertedVariants(nmarkers)
     vars.decomposePangenome(nodes)
     vars.matchAnnotation(annot_fn, pos_offset)
     vars.importReads(reads, nodes)
     vars.filterVariants()
+    vars.offsetPositions(pos_offset)
 
     # look for deletions/fusions
     print('Looking for deletion/fusion variants...')
@@ -436,6 +477,7 @@ def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
     fusions.importReads(reads, nodes, support_only=True)
     fusions.filterVariants()
     fusions.fillInfo(nodes)
+    fusions.offsetPositions(pos_offset)
 
     # merge variants and print
     all_vars = vars.variants
@@ -453,6 +495,83 @@ def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
 
     # write TSV output
     print('Writing summary in ' + output_tsv + ' TSV...')
+    with open(output_tsv, 'wt') as outf:
+        outf.write('\n'.join(for_tsv) + '\n')
+
+
+def readVariantCalls(filen):
+    variants = {}
+    inf = open(filen, 'rt')
+    heads = next(inf).rstrip().split('\t')
+    for line in inf:
+        line = line.rstrip().split('\t')
+        varid = line[heads.index('variant')]
+        if varid not in variants:
+            var = Variant(varid=varid)
+            var.pos = int(line[heads.index('pos')])
+            var.end = int(line[heads.index('end')])
+            pos_ci = line[heads.index('pos_ci')]
+            if pos_ci != 'NA':
+                var.pos_error = int(pos_ci)
+            sig = line[heads.index('sig')]
+            if sig != 'None':
+                var.clinvar = sig
+            var.alt_trav = [line[heads.index('node')]]
+            node_end = int(line[heads.index('end')])
+            if node_end != 'NA':
+                var.alt_trav.append(node_end)
+            var.copy = line[heads.index('copy')]
+            variants[varid] = var
+        # update read support
+        readn = line[heads.index('read')]
+        al = line[heads.index('allele')]
+        if al == 'ref':
+            variants[varid].addRefRead(readn)
+        if al == 'alt':
+            variants[varid].addAltRead(readn)
+    inf.close()
+    print('Read {} variants.'.format(len(variants)))
+    return (variants)
+
+
+def filterVariants(nodes, calls_fn, module=None, annotated_only=False,
+                   fusion_only=False,
+                   start_pos=None, end_pos=None,
+                   output_tsv='calls.filtered.tsv'):
+    variants = readVariantCalls(calls_fn)
+    sel_ids = []
+    for varid in variants:
+        var = variants[varid]
+        # filter by module
+        if module is not None and var.copy != 'c' + module:
+            continue
+        # filter everything except annotated or fusions
+        if annotated_only and fusion_only:
+            if var.clinvar is None and var.pos_error is None:
+                continue
+        else:
+            # filter by annotated
+            if annotated_only and var.clinvar is None:
+                continue
+            # filter by fusion
+            if fusion_only and var.pos_error is None:
+                continue
+        # filter by position
+        if start_pos is not None and end_pos is not None:
+            if var.pos > end_pos or var.getEnd() < start_pos:
+                continue
+        # keep this variant
+        sel_ids.append(varid)
+    # sort them by position
+    var_ids = sorted(sel_ids, key=lambda vid: variants[vid].pos)
+    inc_headers = True
+    for_tsv = []
+    for vid in var_ids:
+        # print or prepare the tsv output for this variant
+        for_tsv += variants[vid].toReadTsv(inc_headers)
+        inc_headers = False
+
+    # write TSV output
     with open(output_tsv, 'wt') as outf:
         outf.write('\n'.join(for_tsv) + '\n')
 
