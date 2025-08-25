@@ -25,7 +25,7 @@ args$out = list(arg='-o', desc='output PDF file', val='parakit.viz.pdf')
 
 ## parse arguments
 args.i = commandArgs(TRUE)
-## args.i = unlist(strsplit('-j rccx.grch38_hprc.mc.config.json -v all_small -n rccx.grch38_hprc.mc.node_info.tsv -e CYP21A2.gencodev43.nearby_genes.tsv -s pangenome -o results/parakit/HG02155.2.13G-A-HG02155.1.P459S/HG02155.2.13G-A-HG02155.1.P459S.rl10000bp.cov20.all_small.pdf -m 1 -c results/parakit/HG02155.2.13G-A-HG02155.1.P459S/HG02155.2.13G-A-HG02155.1.P459S.rl10000bp.cov20.calls.tsv -r results/parakit/HG02155.2.13G-A-HG02155.1.P459S/HG02155.2.13G-A-HG02155.1.P459S.rl10000bp.cov20.all_small.pdf.tsv -d results/parakit/HG02155.2.13G-A-HG02155.1.P459S/HG02155.2.13G-A-HG02155.1.P459S.rl10000bp.cov20.paths-stats.tsv -p results/parakit/HG02155.2.13G-A-HG02155.1.P459S/HG02155.2.13G-A-HG02155.1.P459S.rl10000bp.cov20.paths-info.tsv -l HG02155.2.13G-A-HG02155.1.P459S', ' '))
+## args.i = unlist(strsplit('-j rccx.grch38_hprc.mc.config.json -v all_small -n rccx.grch38_hprc.mc.node_info.tsv -e CYP21A2.gencodev43.nearby_genes.tsv -s pangenome -o temp.pdf -m 1 -c temp.tsv -r temp.pdf.tsv -d results/rccx.grch38_hprc.mc/DEN63190/DEN63190.paths-stats.tsv -p results/rccx.grch38_hprc.mc/DEN63190/DEN63190.paths-info.tsv', ' '))
 arg.to.arg = names(args)
 names(arg.to.arg) = as.character(sapply(args, function(l) l$arg))
 ii = 1
@@ -134,8 +134,8 @@ if(args$viz$val %in% c('calls', 'all', 'all_small', 'allele_support', 'annotate'
 callsGraph <- function(vars){
   ## cluster reads
   vars.m = vars %>% mutate(allele=as.numeric(allele)) %>% select(read, variant, allele) %>%
-    mutate(allele=ifelse(is.na(allele), '0', allele)) %>% 
-    unique %>% 
+    ## mutate(allele=ifelse(is.na(allele), '0', allele)) %>%
+    arrange(allele) %>% filter(!duplicated(paste(read, variant))) %>% 
     pivot_wider(id_cols=read, names_from=variant, values_from=allele, values_fill=0)
   read.ord = vars.m$read
   if(ncol(vars.m)>2){
@@ -191,8 +191,8 @@ callsGraph <- function(vars){
   ggp.vars.pts = ggp.vars.df %>% 
     group_by(read) %>%
     filter(!is.na(variant) & path_part == max(path_part)) %>% 
-    mutate(node=ifelse(!is.na(pos_ci), (node + node_end)/2, node),
-           variant=ifelse(!is.na(pos_ci), paste0(pos, '_FUS_', end), as.character(variant)))
+    mutate(node=ifelse(!is.na(fusion_start_node), (node + fusion_start_node)/2, node),
+           variant=ifelse(!is.na(fusion_start_node), paste0(pos, '_FUS_', end), as.character(variant)))
 
   ## vertical dotted line to help following the variants called
   var.vl = geom_vline(xintercept=unique(ggp.vars.pts$node), linetype=3, linewidth=.3)
@@ -238,7 +238,14 @@ callsGraph <- function(vars){
 if(args$viz$val %in% c('calls', 'all', 'all_small')){
 
   ## load read-variants table
-  vars = read.table(args$calls$val, as.is=TRUE, header=TRUE, check.names=F)
+  vars = read.table(args$calls$val, as.is=TRUE, header=TRUE, check.names=F, sep='\t')
+  reads.ref = strsplit(vars$reads_ref, ',')
+  vars.ref = vars[rep(1:length(reads.ref), unlist(lapply(reads.ref, length))),] %>% dplyr::select(-reads_ref, -reads_alt) %>%
+    mutate(read=unlist(reads.ref), allele='ref')
+  reads.alt = strsplit(vars$reads_alt, ',')
+  vars.alt = vars[rep(1:length(reads.alt), unlist(lapply(reads.alt, length))),] %>% dplyr::select(-reads_ref, -reads_alt) %>%
+    mutate(read=unlist(reads.alt), allele='alt')
+  vars = rbind(vars.ref, vars.alt) %>% mutate(read=gsub('_sr[0-9]+', '', read))
   vars = vars %>% mutate(variant=ifelse(sig!='None', sig, variant),
                          variant=factor(variant, unique(variant)),
                          allele=factor(allele, c('alt', 'ref', 'NA'))) %>%

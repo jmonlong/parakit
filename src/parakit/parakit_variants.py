@@ -52,27 +52,28 @@ class Variant:
     def toReadTsv(self, include_headers=False):
         res = []
         # potentially include the header
-        headers = ['read', 'variant', 'pos', 'end', 'node', 'allele', 'sig',
-                   'copy', 'node_end', 'pos_ci']
+        headers = ['variant', 'pos', 'end', 'node', 'sig', 'copy',
+                   'fusion_start_node', 'pos_ci', 'supp_reads',
+                   'reads_alt', 'reads_ref']
         if include_headers:
             res.append('\t'.join(headers))
         # prepare one row per read
         fmt = '\t'.join(['{}'] * len(headers))
-        n_start = self.alt_trav[0]
         pos = self.pos if self.pos != 0 else 'NA'
         end = self.getEnd()
-        node_end = self.alt_trav[1] if len(self.alt_trav) == 2 else 'NA'
+        node = self.alt_trav[1] if len(self.alt_trav) > 1 else self.alt_trav[0]
+        node_fstart = self.alt_trav[0] if self.pos_error is not None else 'NA'
         pos_ci = self.pos_error if self.pos_error is not None else 'NA'
-        for readn in self.reads_ref:
-            res_r = fmt.format(readn, self.getVariantID(), pos, end, n_start,
-                               'ref', self.clinvar, self.copy,
-                               node_end, pos_ci)
-            res.append(res_r)
-        for readn in self.reads_alt:
-            res_r = fmt.format(readn, self.getVariantID(), pos, end, n_start,
-                               'alt', self.clinvar, self.copy,
-                               node_end, pos_ci)
-            res.append(res_r)
+        reads_ref = ','.join(list(self.reads_ref))
+        if reads_ref == '':
+            reads_ref = 'NA'
+        reads_alt = ','.join(list(self.reads_alt))
+        if reads_alt == '':
+            reads_alt = 'NA'
+        res_r = fmt.format(self.getVariantID(), pos, end, node,
+                           self.clinvar, self.copy, node_fstart, pos_ci,
+                           len(self.reads_alt), reads_alt, reads_ref)
+        res.append(res_r)
         return (res)
 
     def assignCopy(self, nodes):
@@ -194,7 +195,7 @@ class Fusions:
                 if node in cyc_nodes:
                     if len(cur_nodes) > 2 * self.nmarkers:
                         # save current subread
-                        sreadn = readn + '_' + str(len(subread_to_markers))
+                        sreadn = readn + '_sr' + str(len(subread_to_markers))
                         subread_to_markers[sreadn] = {
                             'markers': cur_markers,
                             'nodes': cur_nodes
@@ -516,19 +517,22 @@ def readVariantCalls(filen):
             sig = line[heads.index('sig')]
             if sig != 'None':
                 var.clinvar = sig
-            var.alt_trav = [line[heads.index('node')]]
-            node_end = line[heads.index('node_end')]
-            if node_end != 'NA':
-                var.alt_trav.append(node_end)
+            var.alt_trav = []
+            node_fstart = line[heads.index('fusion_start_node')]
+            if node_fstart != 'NA':
+                var.alt_trav.append(node_fstart)
+            var.alt_trav.append(line[heads.index('node')])
             var.copy = line[heads.index('copy')]
             variants[varid] = var
         # update read support
-        readn = line[heads.index('read')]
-        al = line[heads.index('allele')]
-        if al == 'ref':
-            variants[varid].addRefRead(readn)
-        if al == 'alt':
-            variants[varid].addAltRead(readn)
+        reads_ref = line[heads.index('reads_ref')]
+        if reads_ref != 'NA':
+            for readn in reads_ref.split(','):
+                variants[varid].addRefRead(readn)
+        reads_alt = line[heads.index('reads_alt')]
+        if reads_alt != 'NA':
+            for readn in reads_alt.split(','):
+                variants[varid].addAltRead(readn)
     inf.close()
     print('Read {} variants.'.format(len(variants)))
     return (variants)
