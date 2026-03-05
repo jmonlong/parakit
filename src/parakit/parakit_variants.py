@@ -605,7 +605,175 @@ def decomposePangenome(nodes, pos_offset=0, output_tsv='variants.tsv',
         outf.write('\n'.join(for_tsv) + '\n')
 
 
-def estimateCopyNumber(nodes, reads, window_size=20):
+class NodeCoverage:
+    def __init__(self, nodeid, size):
+        self.nodeid = nodeid
+        self.values = [0]
+        self.lengths = [size]
+        self.bins_start = []
+        self.bins_end = []
+        self.bins_cov = []
+
+    def addRead(self, start, end):
+        n_values = []
+        n_lengths = []
+        # find the first RLE block overlapping the start position
+        ii = 0
+        cpos = 0
+        while ii < len(self.lengths):
+            if start < cpos + self.lengths[ii]:
+                # input range starts within this block
+                if start != cpos:
+                    # it doesn't starts exactly at the beginning of the block
+                    # cut off the first part, without changing its value
+                    n_values.append(self.values[ii])
+                    n_lengths.append(start - cpos)
+                    assert cpos < start
+                    self.lengths[ii] += cpos - start
+                break
+            else:
+                # we're before the range, add this block unchanged
+                cpos += self.lengths[ii]
+                n_values.append(self.values[ii])
+                n_lengths.append(self.lengths[ii])
+                ii += 1
+        # move to next block while decrementing the range
+        range_size = end - start
+        while range_size > 0:
+            if self.lengths[ii] <= range_size:
+                # this block is completely within the range, just increment
+                n_values.append(self.values[ii] + 1)
+                n_lengths.append(self.lengths[ii])
+                # decrease the range size
+                range_size += -self.lengths[ii]
+                ii += 1
+            else:
+                # the range ends within this block,
+                # split in two and increment first one
+                n_values.append(self.values[ii] + 1)
+                n_lengths.append(range_size)
+                self.lengths[ii] += -range_size
+                range_size = 0
+        # add last blocks, unchanged
+        while ii < len(self.lengths):
+            n_values.append(self.values[ii])
+            n_lengths.append(self.lengths[ii])
+            ii += 1
+        self.values = n_values
+        self.lengths = n_lengths
+
+    def addRead2(self, start, end):
+        cpos = 0
+        n_values = []
+        n_lengths = []
+        ii = 0
+        start_done = False
+        end_done = False
+        while ii < len(self.lengths):
+            if start < cpos + self.lengths[ii] and not start_done:
+                # overlaps the current block
+                # cut into a first block like the current one
+                n_values.append(self.values[ii])
+                n_lengths.append(start - cpos)
+                if start - cpos < 0:
+                    print('start - cpos')
+                    print('\t', self.lengths[ii], cpos, start, end)
+                # potentially create the second block with incremented coverage
+                if end > cpos + self.lengths[ii]:
+                    n_values.append(self.values[ii] + 1)
+                    n_lengths.append(self.lengths[ii] + cpos - start)
+                    if self.lengths[ii] + cpos - start < 0:
+                        print('self.lengths[ii] + cpos - start')
+                        print('\t', self.lengths[ii], cpos, start, end)
+                else:
+                    # or the it's completely included within the current block
+                    n_values.append(self.values[ii] + 1)
+                    n_lengths.append(end - start)
+                    if end - start < 0:
+                        print('end - start')
+                        print('\t', self.lengths[ii], cpos, start, end)
+                    n_values.append(self.values[ii])
+                    n_lengths.append(self.lengths[ii] + cpos - end)
+                    if self.lengths[ii] + cpos - end < 0:
+                        print('self.lengths[ii] + cpos - end')
+                        print('\t', self.lengths[ii], cpos, start, end)
+                start_done = True
+            elif end < cpos + self.lengths[ii] and not end_done:
+                # split current block in 2
+                n_values.append(self.values[ii] + 1)
+                n_lengths.append(end - cpos)
+                if end - cpos < 0:
+                    print('end - cpos')
+                    print('\t', self.lengths[ii], cpos, start, end)
+                n_values.append(self.values[ii])
+                n_lengths.append(self.lengths[ii] + cpos - end)
+                if self.lengths[ii] + cpos - end < 0:
+                    print('self.lengths[ii] + cpos - end')
+                    print('\t', self.lengths[ii], cpos, start, end)
+                end_done = True
+            else:
+                # nothing to do
+                if start_done and not end_done:
+                    n_values.append(self.values[ii] + 1)
+                else:
+                    n_values.append(self.values[ii])
+                n_lengths.append(self.lengths[ii])
+                if self.lengths[ii] < 0:
+                    print('self.lengths[ii]')
+                    print('\t', self.lengths[ii], cpos, start, end)
+            # update pointers
+            cpos += self.lengths[ii]
+            ii += 1
+        self.values = n_values
+        self.lengths = n_lengths
+
+    def binCoverage(self, bin_size=100):
+        self.bins_start = []
+        self.bins_end = []
+        self.bins_cov = []
+        ii = 0
+        cur_sum = 0
+        cur_bin = bin_size
+        offset = 0
+        bin_start = 0
+        while ii < len(self.lengths):
+            if self.lengths[ii] - offset < cur_bin:
+                cur_bin += -(self.lengths[ii] - offset)
+                cur_sum += (self.lengths[ii] - offset) * self.values[ii]
+                offset = 0
+                ii += 1
+            else:
+                # save that bin
+                cur_sum += cur_bin * self.values[ii]
+                self.bins_cov.append(cur_sum / bin_size)
+                self.bins_start.append(bin_start)
+                self.bins_end.append(bin_start + bin_size)
+                bin_start += bin_size
+                # start a new one
+                offset += cur_bin
+                cur_bin = bin_size
+                cur_sum = 0
+        # last bin
+        if cur_bin != bin_size:
+            self.bins_cov.append(cur_sum / (bin_size - cur_bin))
+            self.bins_start.append(bin_start)
+            self.bins_end.append(bin_start + bin_size - cur_bin)
+
+    def print(self):
+        top = ''
+        for ii in range(len(self.lengths)):
+            top += str(self.values[ii]) * self.lengths[ii]
+        print(top)
+
+    def printCoverage(self):
+        print('node\tstart\tend\tcoverage')
+        for ii in range(len(self.bins_cov)):
+            print('{}\t{}\t{}\t{}'.format(self.nodeid, self.bins_start[ii],
+                                          self.bins_end[ii],
+                                          self.bins_cov[ii]))
+    
+
+def estimateCopyNumberFromFlanks(nodes, reads, window_size=20):
     fl = 0
     cyc = 0
     # get flanking reference nodes
@@ -635,13 +803,105 @@ def estimateCopyNumber(nodes, reads, window_size=20):
                 else:
                     # cycle -> module start
                     cyc += 1
-    print('flank_total\t{}'.format(fl))
     fl = fl / 2
     print('flank\t{}'.format(fl))
-    print('cycle_total\t{}'.format(cyc))
     cyc = cyc / 2
     print('cycle\t{}'.format(cyc))
     cn = (fl + cyc) / fl
     # assume diploid genome
     cn *= 2
+    print('cn\t{}'.format(round(cn, 4)))
+
+
+def mode(x, min_value=0, bin_size_pct=10):
+    x.sort()
+    x_mean = statistics.mean(x)
+    # compute the number of element within 1% of the mean for each position
+    diff_th = x_mean * bin_size_pct / 100
+    bin_max_ii = None
+    bin_max_n = 0
+    for ii in range(len(x)):
+        if x[ii] < min_value:
+            continue
+        jj = 0
+        while ii+jj < len(x) and abs(x[ii] - x[ii+jj]) < diff_th:
+            jj += 1
+        if jj > bin_max_n:
+            bin_max_n = jj
+            bin_max_ii = ii
+    # return the median of the best 'bin'
+    return (statistics.median(x[bin_max_ii:(bin_max_ii+bin_max_n)]))
+
+
+def estimateCopyNumber(nodes, reads, out_tsv_prefix='parakit.cn', window_size=20,
+                       bin_size=50):
+    # estimate from the flanks
+    estimateCopyNumberFromFlanks(nodes, reads, window_size=window_size)
+    # compute coverage on reference nodes
+    node_cov = {}
+    # also compute the edge coverage for reference nodes
+    edge_cov = {}
+    for noden in nodes:
+        if nodes[noden]['class'] in ['ref', 'none']:
+            node_cov[noden] = NodeCoverage(noden, nodes[noden]['size'])
+            edge_cov[noden] = {'in': {}, 'out': {}}
+    # process all reads
+    for readn in reads.path:
+        path = reads.path[readn]
+        for nii, noden in enumerate(path):
+            if noden in node_cov:
+                # update node coverage
+                rstart = reads.getStartPos(readn, nii)
+                rend = reads.getEndPos(readn, nii)
+                # print(readn)
+                node_cov[noden].addRead(min(rstart, rend), max(rstart, rend))
+                # update edge coverage
+                if nii > 0:
+                    enode = path[nii-1]
+                    if enode not in edge_cov[noden]['in']:
+                        edge_cov[noden]['in'][enode] = 0
+                    edge_cov[noden]['in'][enode] += 1
+                if nii + 1 < len(path):
+                    enode = path[nii+1]
+                    if enode not in edge_cov[noden]['out']:
+                        edge_cov[noden]['out'][enode] = 0
+                    edge_cov[noden]['out'][enode] += 1
+    # debug
+    # write output files
+    fmt = '{}\t{}\t{}\t{}\n'
+    outf = open(out_tsv_prefix + '.node.tsv', 'wt')
+    outf.write(fmt.format('node', 'start', 'end', 'coverage'))
+    # also list bin coverage in ref and none nodes
+    flank_cov = []
+    mod_cov = []
+    for noden in node_cov:
+        # bin node
+        node_cov[noden].binCoverage(bin_size)
+        for ii in range(len(node_cov[noden].bins_cov)):
+            outf.write(fmt.format(noden, node_cov[noden].bins_start[ii],
+                                  node_cov[noden].bins_end[ii],
+                                  node_cov[noden].bins_cov[ii]))
+        if nodes[noden]['class'] == 'ref':
+            flank_cov += node_cov[noden].bins_cov
+        elif nodes[noden]['class'] == 'none':
+            mod_cov += node_cov[noden].bins_cov
+    outf.close()
+    outf = open(out_tsv_prefix + '.edge.tsv', 'wt')
+    outf.write(fmt.format('node', 'enode', 'side', 'coverage'))
+    for noden in edge_cov:
+        for enode in edge_cov[noden]['in']:
+            outf.write(fmt.format(noden, enode, 'in',
+                                  edge_cov[noden]['in'][enode]))
+        for enode in edge_cov[noden]['out']:
+            outf.write(fmt.format(noden, enode, 'out',
+                                  edge_cov[noden]['out'][enode]))
+    outf.close()
+    # compute the mode across all bins in 'ref' nodes
+    flank_cov = mode(flank_cov, min_value=3)
+    # normalize the average bin coverage in 'none' nodes within the module
+    mod_cov = mode(mod_cov, min_value=3)
+    # compute module copy estimate
+    print('flank\t{}'.format(round(flank_cov, 4)))
+    print('module\t{}'.format(round(mod_cov, 4)))
+    cn = 2 * mod_cov / flank_cov
     print('cn\t{}'.format(round(cn, 4)))

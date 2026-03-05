@@ -352,6 +352,8 @@ pars_copy = spars.add_parser('copy',
 pars_copy.add_argument('-j', help='config JSON file', required=True)
 pars_copy.add_argument('-n', help='node information', default='')
 pars_copy.add_argument('-r', default='', help='input alignments in GAF')
+pars_copy.add_argument('-o', help='Output TSV file prefix',
+                       default='parakit.cn')
 pars_copy.set_defaults(scmd='copy')
 
 
@@ -363,8 +365,8 @@ def scmd_copy(args):
     node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
     nodes = pkio.readNodeInfo(node_fn)
     # read GAF
-    reads = pkio.readGAF(args.r, nodes)
-    pkvar.estimateCopyNumber(nodes, reads)
+    reads = pkio.readGAF(args.r, nodes, verbose=True)
+    pkvar.estimateCopyNumber(nodes, reads, out_tsv_prefix=args.o)
     return (True)
 
 
