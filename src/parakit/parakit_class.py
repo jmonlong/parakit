@@ -752,7 +752,6 @@ class Subreads:
                     pos_v.append(site_markers[en][0])
                     val_v.append(site_markers[en][1])
             obs = Observation(pos_v, val_v)
-            # obs.imputeGaps()
             read_prof[sreadn] = obs
         # if verbose:
         #     print('\t\t\t\t{} markers, {} subreads'.format(nmarkers,
@@ -760,7 +759,7 @@ class Subreads:
         # to record the best set of N profiles
         best_em = None
         # init to a high score, like all reads having all pos wrong
-        best_em_ndiff = len(read_prof) * nmarkers
+        best_em_ndiff = len(read_prof) * nmarkers + 10
         # try a couple of attempts and keep the best
         for attempt in range(50):
             # init the EM profiles
@@ -787,7 +786,7 @@ class Subreads:
             cl_size = [len(scl.path) for scl in cluster_list]
             cl_size.sort()
             cl_size = [str(cls) for cls in cl_size]
-            print('\t\tEnumerating haplotypes from {} '
+            print('\t\t\t\tEnumerating haplotypes from {} '
                   'clusters (size {})...'.format(len(cluster_list),
                                                  ', '.join(cl_size)))
         # make a consensus path for each cluster
@@ -916,7 +915,7 @@ class Subreads:
                 if cl == 'flankl':
                     path_exp += self.flankn[0]
                 elif cl == 'flankr':
-                    path_exp += self.flankn[0]
+                    path_exp += self.flankn[1]
                 else:
                     path_exp += cl_paths[cl]
             paths_n['_'.join([str(p) for p in path])] = path_exp
@@ -961,35 +960,6 @@ class Observation:
                 best_ss = ss
         return (best_ss)
 
-    def imputeGaps(self):
-        new_pos = []
-        new_val = []
-        # check if gap in positions
-        cpos = None
-        for ii in range(len(self.pos)):
-            if cpos is not None:
-                while self.pos[ii] != cpos + 1:
-                    # if self.pos[ii] > cpos + 1:
-                    #     print('gap at {}'.format(ii))
-                    #     print(self.pos)
-                    #     print(self.val)
-                    #     break
-                    # if self.pos[ii] < cpos + 1:
-                    #     print('what!?')
-                    #     print(self.pos)
-                    #     print(self.val)
-                    #     break
-                    # missing some positions
-                    new_pos.append(cpos + 1)
-                    new_val.append(self.val[ii])
-                    cpos += 1
-            new_pos.append(self.pos[ii])
-            new_val.append(self.val[ii])
-            cpos = self.pos[ii]
-        # update data
-        self.pos = new_pos
-        self.val = new_val
-
 
 class EM:
     def __init__(self, npos, nstates_per_pos, values=['c1', 'c2']):
@@ -1030,7 +1000,7 @@ class EM:
             ob = obs[obn]
             # find the best profile
             bprof = ob.findBestEMProfile(self)
-            # overwrite profile
+            # count each type of marker at each position of this profile
             for obs_idx, pp in enumerate(ob.pos):
                 oname = '{}_{}_{}'.format(pp, bprof, ob.val[obs_idx])
                 if oname not in counts:
@@ -1049,10 +1019,147 @@ class EM:
                         top_val = val
                 self.prof[pp][ss] = top_val
                 # how many observations were different at this position
-                ndiffs_c = 0
                 for val in self.values:
                     oname = '{}_{}_{}'.format(pp, ss, val)
                     if oname in counts and val != top_val:
-                        ndiffs_c += counts[oname]
-                ndiffs += ndiffs_c
+                        ndiffs += counts[oname]
         return (ndiffs)
+
+    def compareWithTruth(self, hap_truth):
+        # compare each profile to each true haplotype
+        best_truth = [-1] * self.nstates
+        best_truth_match = [0] * self.nstates
+        for prof_ii in range(self.nstates):
+            for truth_ii in range(len(hap_truth)):
+                nmatch = sum([self.prof[pos][prof_ii] == hap_truth[truth_ii][pos] for pos in range(self.npos)])
+                if nmatch > best_truth_match[prof_ii]:
+                    best_truth_match[prof_ii] = nmatch
+                    best_truth[prof_ii] = truth_ii
+        # any true haplotype not found
+        missing_truth = []
+        for truth_ii in range(len(hap_truth)):
+            if truth_ii not in best_truth:
+                missing_truth.append(truth_ii)
+        # print profile next to their most similar true haplotype
+        tp = 'read\t'
+        for prof_ii in range(self.nstates):
+            tp += '  {}/{}'.format(prof_ii, best_truth[prof_ii])
+        tp += '\t'
+        for truth_ii in missing_truth:
+            tp += '  {}'.format(truth_ii)
+        print(tp)
+        print('---')
+        for pp in range(self.npos):
+            tp = str(pp) + '\t'
+            for prof_ii in range(self.nstates):
+                match_s = '=' if self.prof[pp][prof_ii] == hap_truth[best_truth[prof_ii]][pp] else 'x'
+                tp += '  {}{}{}'.format(self.prof[pp][prof_ii], match_s, hap_truth[best_truth[prof_ii]][pp])
+            tp += '\t'
+            for truth_ii in missing_truth:
+                tp += '  {}'.format(hap_truth[truth_ii][pp])
+            print(tp)
+
+
+class MarkerCluster:
+    def __init__(self, marker_position, n_modules, cov_present, cov_absent):
+        # start as a cluster with a single marker in it
+        self.pos = [marker_position]
+        # an array with M marker elements, each with their profile in each
+        # of the N states (number of modules)
+        exp_present = n_modules * cov_present / (cov_present + cov_absent)
+        exp_present = round(exp_present)
+        exp_absent = n_modules - exp_present
+        self.prof = [[True] * exp_present + [False] * exp_absent]
+        # TODO better init the cluster?
+
+    def combine(self, other_marker_cluster, obs_vec):
+        # combine this cluster with another
+        # update profile with consensus?
+        return True
+
+    def has_markers(self, marker_pos):
+        for marker in marker_pos:
+            if marker_pos in self.pos:
+                return True
+        return False
+
+
+class IterativeMarkerClusterer:
+    def __init__(self, nstates, marker_positions):
+        self.nstates = nstates
+        self.npos = len(marker_positions)
+        self.markers = marker_positions
+        self.marker_cluster = []
+        for mark_pos in marker_positions:
+            self.marker_cluster.append(MarkerCluster(mark_pos))
+
+    def cluster(self, obs_vec):
+        # we'll start by merging consecutive markers with the most
+        # supporting reads, so first we prepare a list of marker pairs
+        pair_cov = {}
+        for obs in obs_vec:
+            opos = obs.pos
+            opos.sort()
+            for ii in range(len(opos) - 1):
+                pair_ii = '{}_{}'.format(opos[ii], opos[ii+1])
+                if pair_ii not in pair_cov:
+                    pair_cov[pair_ii] = 0
+                pair_cov[pair_ii] += 1
+        pairs_to_combine = sorted(list(pair_cov.keys()),
+                                  lambda k: -pair_cov[k])
+        # iteratively combine markers/clusters
+        pair_idx = 0
+        while len(self.marker_cluster) > 1:
+            next_pair = pairs_to_combine[pair_idx]
+            next_pair = [int(ii) for ii in next_pair.split('_')]
+            pair_idx += 1
+            # find the clusters containint those two markers
+            cl_idx = []
+            for cl_ii in range(len(self.marker_cluster)):
+                if self.marker_cluster[cl_ii].has_markers(next_pair):
+                    cl_idx.append(cl_ii)
+            # if already in the same cluster, skip
+            if len(cl_idx) == 1:
+                continue
+            # othewise, combine them
+            mark1 = self.marker_cluster[cl_idx[0]]
+            mark2 = self.marker_cluster[cl_idx[1]]
+            del (self.marker_cluster[cl_idx[1]])
+            del (self.marker_cluster[cl_idx[0]])
+            new_marker_cl = mark1.combine(mark2, obs_vec)
+            self.marker_cluster.append(new_marker_cl)
+
+    def compareWithTruth(self, hap_truth):
+        cl = self.marker_cluster[0]
+        # compare each profile to each true haplotype
+        best_truth = [-1] * self.nstates
+        best_truth_match = [0] * self.nstates
+        for prof_ii in range(self.nstates):
+            for truth_ii in range(len(hap_truth)):
+                nmatch = sum([cl.prof[pos][prof_ii] == hap_truth[truth_ii][pos] for pos in range(self.npos)])
+                if nmatch > best_truth_match[prof_ii]:
+                    best_truth_match[prof_ii] = nmatch
+                    best_truth[prof_ii] = truth_ii
+        # any true haplotype not found
+        missing_truth = []
+        for truth_ii in range(len(hap_truth)):
+            if truth_ii not in best_truth:
+                missing_truth.append(truth_ii)
+        # print profile next to their most similar true haplotype
+        tp = 'read\t'
+        for prof_ii in range(self.nstates):
+            tp += '  {}/{}'.format(prof_ii, best_truth[prof_ii])
+        tp += '\t'
+        for truth_ii in missing_truth:
+            tp += '  {}'.format(truth_ii)
+        print(tp)
+        print('---')
+        for pp in range(self.npos):
+            tp = str(pp) + '\t'
+            for prof_ii in range(self.nstates):
+                match_s = '=' if cl.prof[pp][prof_ii] == hap_truth[best_truth[prof_ii]][pp] else 'x'
+                tp += '  {}{}{}'.format(cl.prof[pp][prof_ii], match_s, hap_truth[best_truth[prof_ii]][pp])
+            tp += '\t'
+            for truth_ii in missing_truth:
+                tp += '  {}'.format(hap_truth[truth_ii][pp])
+            print(tp)
