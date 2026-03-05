@@ -7,18 +7,27 @@ def findPaths(nodes, reads, args):
     if args.t:
         print("Enumerating candidate haplotypes..")
     # other parameters (add to command line one day?)
+    # two modes to cluster the reads in module-alleles
+    # by default, the first one implemented iteratively splits clusters in two
     clust_mode = 'biclust'
+    em_o = None
     if args.m:
         args_m = args.m.split(',')
         if len(args_m) == 2:
+            # once at most max_cls candidate clusters are enumerate
+            # they are combined into at most max_haps haplotypes
             max_cls = int(args_m[0])
             max_haps = int(args_m[1])
         else:
+            # this is the EM algorithm that will test different module copy
+            # number (from min_modc, to max_modc). n_em_cand repetitions will
+            # be run for each copy number
             clust_mode = 'em'
             min_modc = int(args_m[0])
             max_modc = int(args_m[1])
             n_em_cand = int(args_m[2])
-            max_haps = 100
+            # max_haps is not used in this mode
+            max_haps = None
     # upate nodes with read info
     for readn in reads.path:
         path = reads.path[readn]
@@ -64,12 +73,13 @@ def findPaths(nodes, reads, args):
                                    min_read_support=args.c,
                                    verbose=args.t)
     elif clust_mode == 'em':
-        paths = clusterSubreadsEM(nodes, reads,
-                                  min_read_support=args.c,
-                                  min_module_copies=min_modc,
-                                  max_module_copies=max_modc,
-                                  ncandidates=n_em_cand,
-                                  verbose=args.t)
+        em_o = clusterSubreadsEM(nodes, reads,
+                                 min_read_support=args.c,
+                                 min_module_copies=min_modc,
+                                 max_module_copies=max_modc,
+                                 ncandidates=n_em_cand,
+                                 verbose=args.t)
+        paths = em_o['paths']
 
     # potentially first select the best paths (in case there are too
     # many paths and we don't want to consider all pairs)
@@ -118,34 +128,59 @@ def findPaths(nodes, reads, args):
     max_cov_dev = 0
     min_cov_dev = math.inf
     max_aln = 0
-    for mii in range(len(best_paths)):
-        for mjj in range(mii, len(best_paths)):
-            mode1 = best_paths[mii]
-            mode2 = best_paths[mjj]
-            esc = evaluatePaths(read_cov, path_cov[mode1], path_cov[mode2],
-                                nodes, reads.path,
-                                longest_reads,
-                                aln_score[mode1], aln_score[mode2])
-            esc['hap1'] = mode1
-            esc['hap2'] = mode2
-            escores.append(esc)
-            # update the extreme values used to scale score later
-            max_cor = max(max_cor, esc['cov_cor'])
-            max_cov_dev = max(max_cov_dev, esc['cov_dev'])
-            min_cov_dev = min(min_cov_dev, esc['cov_dev'])
-            max_aln = max(max_aln, esc['aln_score'])
+    min_hap_ll = 0
+    max_hap_ll = -math.inf
+    # which pairs of haplotypes to consider
+    hap_pairs_names = []
+    if clust_mode == 'biclust':
+        # all pairs
+        for mii in range(len(best_paths)):
+            for mjj in range(mii, len(best_paths)):
+                hap_pairs_names.append([best_paths[mii],
+                                        best_paths[mjj]])
+    else:
+        # only the run for each EM
+        hap_pairs_names = em_o['hap_pairs']
+    # evaluate each haplotype pair
+    for hpair_names in hap_pairs_names:
+        mode1 = hpair_names[0]
+        mode2 = hpair_names[1]
+        esc = evaluatePaths(read_cov, path_cov[mode1], path_cov[mode2],
+                            nodes, reads.path,
+                            longest_reads,
+                            aln_score[mode1], aln_score[mode2])
+        esc['hap1'] = mode1
+        esc['hap2'] = mode2
+        # compute likelihood of read assignment to haplotypes
+        esc['hap_ll'] = computeHapPairLikelihood(nodes, path_cov[mode1],
+                                                 path_cov[mode2],
+                                                 aln_score[mode1],
+                                                 aln_score[mode2])
+        escores.append(esc)
+        # update the extreme values used to scale score later
+        max_cor = max(max_cor, esc['cov_cor'])
+        max_cov_dev = max(max_cov_dev, esc['cov_dev'])
+        min_cov_dev = min(min_cov_dev, esc['cov_dev'])
+        max_aln = max(max_aln, esc['aln_score'])
+        max_hap_ll = max(max_hap_ll, esc['hap_ll'])
+        min_hap_ll = min(min_hap_ll, esc['hap_ll'])
     # adjust scores to the [0,1] range
     cov_dev_a = (max_cov_dev - min_cov_dev)
+    hap_ll_a = (min_hap_ll - max_hap_ll)
     for esc in escores:
         esc['cov_cor_adj'] = esc['cov_cor'] / max_cor
         if cov_dev_a == 0:
             esc['cov_dev_adj'] = 1
         else:
             esc['cov_dev_adj'] = (max_cov_dev - esc['cov_dev']) / cov_dev_a
+        if hap_ll_a == 0:
+            esc['hap_ll_adj'] = 1
+        else:
+            esc['hap_ll_adj'] = (min_hap_ll - esc['hap_ll']) / hap_ll_a
         esc['aln_score_adj'] = esc['aln_score'] / max_aln
     # rank hap pairs
     escores_r = sorted(escores,
-                       key=lambda k: k['cov_dev_adj'] + k['aln_score_adj'],
+                       key=lambda k: k['cov_dev_adj'] + k['aln_score_adj'] + k['cov_cor_adj'] + k['hap_ll_adj'],
                        reverse=True)
     return ({'escores': escores_r, 'paths': paths})
 
@@ -212,6 +247,7 @@ def clusterSubreadsEM(nodes, reads, min_read_support=3, min_module_copies=1,
     # list of subreads clusters
     # try to cluster in K profiles, K being any possible module number
     paths = {}
+    hap_pair_names = []
     for nmodules in module_copies:
         # let's cluster the subreads multiple times to get
         # more than one candidate
@@ -227,10 +263,17 @@ def clusterSubreadsEM(nodes, reads, min_read_support=3, min_module_copies=1,
             cpaths = sreads.enumAllelePair(sreads_list,
                                            min_read_support=0,
                                            verbose=verbose)
+            hpair_names = []
             for pathn in cpaths:
                 new_pathn = '{}m_c{}_{}'.format(nmodules, ncand, pathn)
                 paths[new_pathn] = cpaths[pathn]
-    return (paths)
+                hpair_names.append(new_pathn)
+            if len(hpair_names) > 0:
+                hap_pair_names.append(hpair_names)
+    res = {}
+    res['paths'] = paths
+    res['hap_pairs'] = hap_pair_names
+    return (res)
 
 
 def pathReadGraphAlign(path, reads, nodes={}, max_node_gap=10):
@@ -292,6 +335,49 @@ def pathReadGraphAlign(path, reads, nodes={}, max_node_gap=10):
         else:
             read_scores[readn] = round(best_score / max_score, 3)
     return read_scores
+
+
+def computeHapPairLikelihood(nodes, path_cov_1, path_cov_2,
+                             read_scores_1, read_scores_2,
+                             prob_error=.01):
+    # for each node, compute a likelihood of observing this path assignment
+    tot_ll = 0
+    for noden in nodes:
+        # skip nodes with no read coverage
+        if 'reads' not in nodes[noden]:
+            continue
+        # otherwise count number of reads assigned to each path
+        read_to_path = [0, 0]
+        for read_pos in nodes[noden]['reads']:
+            if read_scores_1[read_pos[0]] == read_scores_2[read_pos[0]]:
+                # tie, assign to both?
+                read_to_path[0] += 1
+                read_to_path[1] += 1
+            elif read_scores_1[read_pos[0]] > read_scores_2[read_pos[0]]:
+                # assign to first path
+                read_to_path[0] += 1
+            else:
+                # assign to second path
+                read_to_path[1] += 1
+        tot_reads = sum(read_to_path)
+        # compare with number in each path
+        nc1 = path_cov_1[noden] if noden in path_cov_1 else 0
+        nc2 = path_cov_2[noden] if noden in path_cov_2 else 0
+        # compute log-likelihood
+        ll = None
+        if nc1 + nc2 == 0:
+            # likelihood of mapping errors
+            ll = tot_reads * math.log(prob_error)
+        else:
+            # binomial distribution across pair of paths
+            ll = math.log(math.comb(tot_reads, read_to_path[0]))
+            prob1 = nc1 / (nc1 + nc2) if nc1 > 0 else prob_error
+            prob2 = nc2 / (nc1 + nc2) if nc2 > 0 else prob_error
+            ll += read_to_path[0] * math.log(prob1)
+            ll += read_to_path[1] * math.log(prob2)
+        tot_ll += ll
+    # return the sum of log-likelihood across all nodes
+    return (tot_ll)
 
 
 def evaluatePaths(read_cov, path_cov_1, path_cov_2,

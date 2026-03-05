@@ -231,9 +231,9 @@ def readGAF(filen, nodes, verbose=False):
             path_node_startpos.reverse()
             path_node_endpos.reverse()
             for ii in range(len(path_node_startpos)):
-                nsize = nodes[path_cov[ii][0]]['size']
-                path_node_startpos[ii] = nsize - path_node_startpos[ii]
-                path_node_endpos[ii] = nsize - path_node_endpos[ii]
+                spos = path_node_startpos[ii]
+                path_node_startpos[ii] = path_node_endpos[ii]
+                path_node_endpos[ii] = spos
         path_cov_node = [pc[0] for pc in path_cov]
         reads_tr.addRead(readn, path_cov_node, cyc_nodes=cyc_nodes,
                          startpos=path_node_startpos,
@@ -784,8 +784,9 @@ def writePathsInfo(paths_res, nodes, stats_fn, info_fn):
     paths = paths_res['paths']
     # write ranked list
     outf_rk = open(stats_fn, 'wt')
-    heads_rk = ['hap1', 'hap2', 'cov_cor', 'cov_dev', 'aln_score',
-                'cov_cor_adj', 'cov_dev_adj', 'aln_score_adj', 'aln_long_prop']
+    heads_rk = ['hap1', 'hap2', 'cov_cor', 'cov_dev', 'hap_ll', 'aln_score',
+                'cov_cor_adj', 'cov_dev_adj', 'hap_ll_adj',
+                'aln_score_adj', 'aln_long_prop']
     ofmt_rk = '\t'.join(['{}'] * len(heads_rk)) + '\n'
     outf_rk.write('\t'.join(heads_rk) + '\n')
     for esc in escores_r:
@@ -793,9 +794,11 @@ def writePathsInfo(paths_res, nodes, stats_fn, info_fn):
                                      esc['hap2'],
                                      esc['cov_cor'],
                                      esc['cov_dev'],
+                                     esc['hap_ll'],
                                      esc['aln_score'],
                                      esc['cov_cor_adj'],
                                      esc['cov_dev_adj'],
+                                     esc['hap_ll_adj'],
                                      esc['aln_score_adj'],
                                      esc['aln_long_prop']))
 
