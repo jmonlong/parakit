@@ -263,6 +263,10 @@ pars_annotate.add_argument('-o', help='output PDF file',
                            default='parakit.viz.pdf')
 pars_annotate.add_argument('-e', help='input genome element annotation TSV',
                            default='')
+pars_annotate.add_argument('-a', help='annotation file (e.g. from ClinVar)',
+                           default='')
+pars_annotate.add_argument('-m', help='number of markers checked around the SNPs',
+                           default=20, type=int)
 pars_annotate.add_argument('-s', default='pangenome',
                            help='Optional. Scale for the x-axis. Either pangenome or genome. ')
 pars_annotate.add_argument('-t', help='debug trace mode', action='store_true')
@@ -301,6 +305,24 @@ def scmd_annotate(args):
     # update/guess paths before
     args.n = pkio.nodeFile(config, fn=args.n, check_file=True)
     args.e = pkio.geneFile(args.e, config, check_file=True)
+    # if annotation provided, call variants
+    if args.a != '':
+        # get offset from config file
+        c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
+        pos_offset += 1
+        nodes = pkio.readNodeInfo(args.n, verbose=args.t)
+        # update with edge information
+        pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
+        pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=args.t)
+        # read annotation
+        clinvar_fn = pkio.clinvarFile(args.a, config, check_file=True)
+        # read GAF
+        reads = pkio.readGAF(args.r, nodes, verbose=args.t)
+        # variants in reads and write output TSV
+        pkvar.findVariants(nodes=nodes, annot_fn=clinvar_fn,
+                           reads=reads, nmarkers=args.m,
+                           pos_offset=pos_offset, min_support=1,
+                           output_tsv=args.o + '.calls.tsv')
     # run the R script to make the graphs
     pkproc.runRscript(script_path, args)
 
