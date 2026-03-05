@@ -56,6 +56,65 @@ def parseCg(cg):
     return res
 
 
+def parseCs(cs):
+    nums = [str(ii) for ii in range(10)]
+    num_c = ''
+    type_c = ''
+    res = []
+    # we'll consider exact matches and substitutions together, like the M in
+    # the CIGAR string.
+    # With var_size, we keep track of the size of this M segment
+    var_size = 0
+    for cc in cs:
+        if cc in [':', '*']:
+            if type_c != 'M':
+                # we were not in a M segment, start new segment
+                if type_c != '':
+                    # if not the first segment, save and start new one
+                    num_c = 0 if num_c == '' else int(num_c)
+                    res.append([num_c + var_size, type_c])
+                type_c = 'M'
+                num_c = ''
+                var_size = 0
+            else:
+                # we're extending a M segment
+                if num_c != '':
+                    # if we were extending a ":[0-9]+", update the size
+                    var_size += int(num_c)
+                num_c = ''
+            # if we're starting a substitution, we know it will be of size 1
+            if cc == '*':
+                var_size += 1
+        elif cc == '+':
+            if type_c != '':
+                # if not the first segment, save and start new one
+                num_c = 0 if num_c == '' else int(num_c)
+                res.append([num_c + var_size, type_c])
+            type_c = 'I'
+            num_c = ''
+            var_size = 0
+        elif cc == '-':
+            if type_c != '':
+                # if not the first segment, save and start new one
+                num_c = 0 if num_c == '' else int(num_c)
+                res.append([num_c + var_size, type_c])
+            type_c = 'D'
+            num_c = ''
+            var_size = 0
+        elif cc in nums:
+            # for numbers, update num_c
+            num_c += cc
+        elif cc in ['A', 'T', 'G', 'C', 'N']:
+            # nucleotides mean we're in an insertion or deletion segment
+            if type_c in ['I', 'D']:
+                var_size += 1
+        else:
+            print('W: unexpected character in cs tag', cc)
+    num_c = 0 if num_c == '' else int(num_c)
+    res.append([num_c + var_size, type_c])
+    return res
+
+
 def parsePath(path):
     cur_node = ''
     cur_strand = ''
@@ -100,7 +159,6 @@ def readGAF(filen, nodes, verbose=False):
         readn = line[0]
         if reads_tr.hasRead(readn):
             supp_aln_cpt[readn] += 1
-            readn = '{}_sa{}'.format(readn, supp_aln_cpt[readn])
             nsupp_aln += 1
             continue
         else:
@@ -111,16 +169,22 @@ def readGAF(filen, nodes, verbose=False):
         for tag in line[12:]:
             tag = tag.split(':')
             if tag[0] == 'cg':
-                cg = tag[2]
+                cg = parseCg(tag[2])
                 break
         if cg == '':
-            nunmp += 1
-            continue
+            # look for cs tag instead
+            for tag in line[12:]:
+                tag_s = tag.split(':')
+                if tag_s[0] == 'cs':
+                    cg = parseCs(tag[5:])
+                    break
+            if cg == '':
+                nunmp += 1
+                continue
         # parse CIGAR string
         n_idx = 0
         node_pos = int(line[7])
         read_pos = int(line[2])
-        cg = parseCg(cg)
         path_cov = []
         path_node_startpos = []
         path_node_endpos = []
@@ -128,7 +192,7 @@ def readGAF(filen, nodes, verbose=False):
         cur_endpos = node_pos
         for cc in cg:
             for bp in range(cc[0]):
-                if cc[1] == '=':
+                if cc[1] in ['=', 'M']:
                     # node is actually covered
                     if len(path_cov) == 0 or path_cov[-1][0] != path[n_idx][0]:
                         if len(path_cov) != 0:
@@ -145,9 +209,9 @@ def readGAF(filen, nodes, verbose=False):
                             path_node_startpos.append(nsize - node_pos)
                         path_read_pos.append(read_pos)
                         cur_endpos = node_pos
-                if cc[1] in ['I', 'X', '=']:
+                if cc[1] in ['I', 'X', '=', 'M']:
                     read_pos += 1
-                if cc[1] in ['D', 'X', '=']:
+                if cc[1] in ['D', 'X', '=', 'M']:
                     if cc[1] in ['=']:
                         cur_endpos = node_pos
                     node_pos += 1
