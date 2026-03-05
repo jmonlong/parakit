@@ -237,25 +237,35 @@ callsGraph <- function(vars){
 
 if(args$viz$val %in% c('calls', 'all', 'all_small')){
 
-  ## load read-variants table
-  vars = read.table(args$calls$val, as.is=TRUE, header=TRUE, check.names=F, sep='\t')
-  reads.ref = strsplit(vars$reads_ref, ',')
-  vars.ref = vars[rep(1:length(reads.ref), unlist(lapply(reads.ref, length))),] %>% dplyr::select(-reads_ref, -reads_alt) %>%
-    mutate(read=unlist(reads.ref), allele='ref')
-  reads.alt = strsplit(vars$reads_alt, ',')
-  vars.alt = vars[rep(1:length(reads.alt), unlist(lapply(reads.alt, length))),] %>% dplyr::select(-reads_ref, -reads_alt) %>%
-    mutate(read=unlist(reads.alt), allele='alt')
-  vars = rbind(vars.ref, vars.alt) %>% mutate(read=gsub('_sr[0-9]+', '', read))
-  vars = vars %>% mutate(variant=ifelse(sig!='None', sig, variant),
-                         variant=factor(variant, unique(variant)),
-                         allele=factor(allele, c('alt', 'ref', 'NA'))) %>%
-    dplyr::rename(varpos=pos)
+  vars.head = vars = scan(args$calls$val, '', quiet=TRUE, n=1)
+  if (length(vars.head) > 0){
+    ## load read-variants table
+    vars = read.table(args$calls$val, as.is=TRUE, header=TRUE, check.names=F, sep='\t')
+    if(any(!is.na(vars$reads_ref))){
+      reads.ref = strsplit(vars$reads_ref, ',')
+      vars.ref = vars[rep(1:length(reads.ref), unlist(lapply(reads.ref, length))),] %>% dplyr::select(-reads_ref, -reads_alt) %>%
+        mutate(read=unlist(reads.ref), allele='ref')
+    } else {
+      vars.ref = data.frame()
+    }
+    reads.alt = strsplit(vars$reads_alt, ',')
+    vars.alt = vars[rep(1:length(reads.alt), unlist(lapply(reads.alt, length))),] %>% dplyr::select(-reads_ref, -reads_alt) %>%
+      mutate(read=unlist(reads.alt), allele='alt')
+    vars = rbind(vars.ref, vars.alt) %>% mutate(read=gsub('_sr[0-9]+', '', read))
+    vars = vars %>% mutate(variant=ifelse(sig!='None', sig, variant),
+                           variant=factor(variant, unique(variant)),
+                           allele=factor(allele, c('alt', 'ref', 'NA'))) %>%
+      dplyr::rename(varpos=pos)
 
-  calls.graph = callsGraph(vars)
+    calls.graph = callsGraph(vars)
 
-  ggp$reads = calls.graph$ggp.reads
-  var.vl = calls.graph$var.vl
-  xlims_v = calls.graph$xlims_v
+    ggp$reads = calls.graph$ggp.reads
+    var.vl = calls.graph$var.vl
+    xlims_v = calls.graph$xlims_v
+  } else {
+    ggp$reads = ggplot() + theme_void()
+    var.vl=NULL
+  }
 }
 
 ##

@@ -1,3 +1,6 @@
+import statistics
+
+
 class Variant:
     def __init__(self, ref_trav=None, alt_trav=None,
                  ref_seq=None, alt_seq=None, varid=None):
@@ -33,7 +36,7 @@ class Variant:
     def toTsv(self, include_headers=False):
         res = []
         # potentially include the header
-        headers = ['variant', 'pos', 'end', 'node', 'ref_trav',
+        headers = ['variant', 'pos', 'end', 'node', 'ref_trav', 'ref_seq',
                    'alt_trav', 'alt_seq', 'copy']
         if include_headers:
             res.append('\t'.join(headers))
@@ -44,7 +47,7 @@ class Variant:
         ref_trav = ['_'.join(trav) for trav in self.ref_trav]
         ref_trav = '-'.join(ref_trav)
         res_r = fmt.format(self.getVariantID(), pos, end, self.alt_trav[0],
-                           ref_trav, '_'.join(self.alt_trav),
+                           ref_trav, self.ref_seq, '_'.join(self.alt_trav),
                            self.alt_seq, self.copy)
         res.append(res_r)
         return (res)
@@ -271,7 +274,7 @@ class Fusions:
                     self.variants[fusid].copy = fusion_start_copy
                 self.variants[fusid].addAltRead(sreadn)
 
-    def filterVariants(self):
+    def filterVariants(self, min_support=3):
         selected_vars = {}
         # sort by the most supporting reads
         vars_s = sorted(list(self.variants.keys()),
@@ -283,7 +286,7 @@ class Fusions:
             for readn in self.variants[varid].reads_alt:
                 if readn not in used_reads:
                     supp_reads.add(readn)
-            if len(supp_reads) >= 3:
+            if len(supp_reads) >= min_support:
                 selected_vars[varid] = self.variants[varid]
                 selected_vars[varid].reads_alt = supp_reads
                 for readn in supp_reads:
@@ -448,10 +451,10 @@ class ConvertedVariants:
         elif ref_support and not alt_support:
             var.addRefRead(readn)
     
-    def filterVariants(self):
+    def filterVariants(self, min_support=3):
         selected_vars = {}
         for varid in self.variants:
-            if self.variants[varid].nAltReads() >= 3:
+            if self.variants[varid].nAltReads() >= min_support:
                 selected_vars[varid] = self.variants[varid]
         self.variants = selected_vars
 
@@ -461,14 +464,14 @@ class ConvertedVariants:
 
 
 def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
-                 output_tsv='calls.tsv'):
+                 min_support=3, output_tsv='calls.tsv'):
     # decomposePangenome(nodes, pos_offset)
     # look for read support for variant edges in vedges
     vars = ConvertedVariants(nmarkers)
     vars.decomposePangenome(nodes)
     vars.matchAnnotation(annot_fn, pos_offset)
     vars.importReads(reads, nodes)
-    vars.filterVariants()
+    vars.filterVariants(min_support)
     vars.offsetPositions(pos_offset)
 
     # look for deletions/fusions
@@ -476,7 +479,7 @@ def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
     fusions = Fusions()
     fusions.importReads(reads, nodes)
     fusions.importReads(reads, nodes, support_only=True)
-    fusions.filterVariants()
+    fusions.filterVariants(min_support)
     fusions.fillInfo(nodes)
     fusions.offsetPositions(pos_offset)
 
