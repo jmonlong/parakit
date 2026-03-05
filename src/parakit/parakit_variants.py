@@ -580,10 +580,14 @@ def filterVariants(nodes, calls_fn, module=None, annotated_only=False,
         outf.write('\n'.join(for_tsv) + '\n')
 
 
-def decomposePangenome(nodes, pos_offset=0, output_tsv='variants.tsv'):
+def decomposePangenome(nodes, pos_offset=0, output_tsv='variants.tsv',
+                       annot_fn=None):
     # look for read support for variant edges in vedges
     vars = ConvertedVariants()
     vars.decomposePangenome(nodes)
+    if annot_fn is not None:
+        vars.matchAnnotation(annot_fn, pos_offset)
+    vars.offsetPositions(pos_offset)
     vars = vars.variants
 
     # sort them by position

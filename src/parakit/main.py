@@ -54,6 +54,43 @@ def scmd_construct(args):
     print('Node information: ' + node_tsv)
 
 
+# deconstruct: list all the variants in the pangenome
+pars_deconstruct = spars.add_parser('deconstruct',
+                                    help='list variants in pangenome')
+pars_deconstruct.add_argument('-j', help='config JSON file', required=True)
+pars_deconstruct.add_argument('-n', help='node information', default='')
+pars_deconstruct.add_argument('-g', help='input GFA pangenome', default='')
+pars_deconstruct.add_argument('-a', help='annotation file (e.g. from ClinVar)',
+                              default='')
+pars_deconstruct.add_argument('-o', help='output file', default='variants.tsv')
+pars_deconstruct.add_argument('-t', help='debug trace mode', action='store_true')
+pars_deconstruct.set_defaults(scmd='deconstruct')
+
+
+def scmd_deconstruct(args):
+    # read config json file
+    config = json.load(open(args.j, 'rt'))
+    # get offset from config file
+    c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
+    pos_offset += 1
+
+    # load node info
+    node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
+    nodes = pkio.readNodeInfo(node_fn, verbose=args.t)
+
+    # update with edge information
+    pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
+    pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=args.t)
+
+    # read annotation (optional)
+    clinvar_fn = pkio.clinvarFile(args.a, config)
+    if not os.path.isfile(clinvar_fn):
+        clinvar_fn = None
+
+    # decompose variants and annotate
+    pkvar.decomposePangenome(nodes, annot_fn=clinvar_fn,
+                             pos_offset=pos_offset, output_tsv=args.o)
+
 # map subcommand: map reads to the pangenome
 pars_map = spars.add_parser('map',
                             help='map reads to the pangenome')
@@ -393,6 +430,8 @@ def main():
 
     if args.scmd == 'construct':
         scmd_construct(args)
+    elif args.scmd == 'deconstruct':
+        scmd_deconstruct(args)
     elif args.scmd == 'map':
         scmd_map(args)
     elif args.scmd == 'call':
