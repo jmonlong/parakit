@@ -5,6 +5,28 @@ import os
 
 
 def readNodeInfo(filen, verbose=False):
+    """Loads the node information from a file
+
+    Reads the TSV prepared after the pangenome construction and returns an
+    object with information for each node. For example, size, sequence, is
+    it on the reference path or informative (assigned to a particular module).
+
+    Args:
+        filen : the path to the TSV file
+        verbose : print some messages? Default is False
+
+    Returns: dict
+                node name -> dict
+                                size node size (bp)
+                                c1 number of module 1 traversals
+                                c2 number of module 2 traversals
+                                ref number of reference traversal
+                                rpos_min minimum position on reference path
+                                rpos_max maximum position on reference path
+                                rnode assigned reference node proxy
+                                class either none, c1, c2 or ref, cyc_l, cyc_r
+                                seq beginning of the node sequence
+    """
     if verbose:
         print('Reading ' + filen + '...')
     nodes = {}
@@ -132,15 +154,25 @@ def parsePath(path):
     return (res)
 
 
-# 'nodes' is used to know the node size
-def readGAF(filen, nodes, verbose=False):
+def readGAF(filen, nodes, verbose=False, min_read_len=0):
+    """Read GAF file and load the read alignments
+
+    Process each GAF record, including the CIGAR string, to figure out
+    which nodes are traversed (on at least one base) in the
+    graph. Reads are flipped so that they (mostly) traverse the
+    pangenome in the forward orientation. The nodes input is used to
+    know the node size.
+
+    Args:
+        filen : path to the GAF file
+        nodes : the dict with node information (inc. size)
+        verbose : print some informative messages? Default: False
+
+    Returns: a Reads object
+
+    """
     if verbose:
         print('Reading ' + filen + '...')
-    # list cycling nodes
-    cyc_nodes = []
-    for nod in nodes:
-        if nodes[nod]['class'] == 'cyc_r':
-            cyc_nodes.append(nod)
     # guess if input file is gzipped
     if filen.endswith('.gz'):
         inf_gaf = gzip.open(filen, 'rt')
@@ -163,6 +195,9 @@ def readGAF(filen, nodes, verbose=False):
             continue
         else:
             supp_aln_cpt[readn] = 0
+        # skip if read is too short
+        if int(line[1]) < min_read_len:
+            continue
         path = parsePath(line[5])
         # find CIGAR string
         cg = ''
@@ -235,7 +270,7 @@ def readGAF(filen, nodes, verbose=False):
                 path_node_startpos[ii] = path_node_endpos[ii]
                 path_node_endpos[ii] = spos
         path_cov_node = [pc[0] for pc in path_cov]
-        reads_tr.addRead(readn, path_cov_node, cyc_nodes=cyc_nodes,
+        reads_tr.addRead(readn, path_cov_node,
                          startpos=path_node_startpos,
                          endpos=path_node_endpos,
                          readpos=path_read_pos)
@@ -329,6 +364,15 @@ def readGFAasReads(filen, nodes, verbose=False):
 
 
 def updateNodesSucsWithGFA(nodes, filen, verbose=False):
+    """Update the node dict with information about next nodes in graph
+
+    Reads a GFA file and saves successors of each nodes. Adds a new
+    'sucs' key in the node dict. It's a dict (used as a set) with the
+    names of the successor nodes.
+
+    Args:
+        nodes : dict with nodes information
+    """
     if verbose:
         print('Reading ' + filen + '...')
     # read GFA and update edges
@@ -607,122 +651,18 @@ def readGFA(gfa_fn, min_fc=3, refname='grch38', out_tsv='',
         outf.close()
 
 
-# def readVariantAnnotation(filen, nodes, offset):
-#     # for an edge, we'll save the clinvar ID(s) and if it's the ref/alt allele
-#     # there might be multiple clinvar records sharing an
-#     # edge (the ref allele edge) so save a list of clinvar info for each edge,
-#     # e.g. for some:
-#     # var_edges['nod1']['nod2'] = [{cvid: 'id1', 'ref': True},
-#     #                              {cvid: 'id2', 'ref': True}]
-#     var_edges = {}
-#     # list potential starting nodes for the "variant" edges,
-#     # i.e. on the reference path and with multiple successors
-#     snodes = []
-#     for nod in nodes:
-#         if 'sucs' not in nodes[nod]:
-#             continue
-#         if nodes[nod]['ref'] > 1 and len(nodes[nod]['sucs']) > 1:
-#             snodes.append(nod)
-#     # read the input tsv file
-#     inf = open(filen, 'rt')
-#     heads = next(inf).rstrip().split('\t')
-#     for line in inf:
-#         # parse the line and get some info
-#         line = line.rstrip().split('\t')
-#         pos = int(line[heads.index('start')]) - offset
-#         ref = line[heads.index('ref')]
-#         alt = line[heads.index('alt')]
-#         cvid = '{}_{}_{}'.format(line[heads.index('id')],
-#                                  line[heads.index('nuc.change')],
-#                                  line[heads.index('prot.change')])
-#         # find a potential starting node as the one that ends exactly at pos
-#         snode = ''
-#         for nod in snodes:
-#             # 'pos' should be the position of the base at the end of that node
-#             if nodes[nod]['rpos_max'] + nodes[nod]['size'] == pos:
-#                 snode = nod
-#         # skip if we didn't find a suitable starting node for the edge
-#         if snode == '':
-#             continue
-#         # check the alleles spelled by that node's successors
-#         next_nodes = list(nodes[snode]['sucs'].keys())
-#         for nnod in next_nodes:
-#             vedge = ''  # is it a ref or alt edge
-#             # if no padding, looking for exact match in the SNV bubble
-#             # note: currently doesn't work for MNPs with no padding base
-#             if ref[0] != alt[0]:
-#                 if ref == nodes[nnod]['seq']:
-#                     # reference allele of SNV
-#                     vedge = 'ref'
-#                 elif alt == nodes[nnod]['seq']:
-#                     # alternate allele of SNV
-#                     vedge = 'alt'
-#             else:
-#                 # padding, either insertion or deletion
-#                 # looking for exact match of the long allele
-#                 # assume the short allele is the other one
-#                 # (if on the reference path)
-#                 if alt[1:] == nodes[nnod]['seq'] and nodes[nnod]['ref'] < 2:
-#                     # alternate allele of insertion
-#                     vedge = 'alt'
-#                 elif ref[1:] == nodes[nnod]['seq'] and nodes[nnod]['ref'] > 1:
-#                     print('node {}: ref {}'.format(nnod, nodes[nnod]['ref']))
-#                     # reference allele of deletion
-#                     vedge = 'ref'
-#                 elif nodes[nnod]['ref'] > 1:
-#                     # the sequence doesn't match but if it's a node on the
-#                     # reference path it might just be the "short" allele with
-#                     # the deleted sequence (alt) or without the inserted
-#                     # sequence (ref)
-#                     if len(ref) < len(alt):
-#                         # insertion so likely the reference allele
-#                         vedge = 'ref'
-#                     else:
-#                         # deletion so likely the alt allele
-#                         vedge = 'alt'
-#             # if we found a match, save it to var_edges
-#             if vedge == 'ref' or vedge == 'alt':
-#                 if snode not in var_edges:
-#                     var_edges[snode] = {}
-#                 if nnod not in var_edges[snode]:
-#                     var_edges[snode][nnod] = []
-#                 var_edges[snode][nnod].append({'cvid': cvid,
-#                                                'ref': vedge == 'ref'})
-#     inf.close()
-#     # find variants with both a ref and alt edge
-#     esum = {}
-#     for nod1 in var_edges:
-#         for nod2 in var_edges[nod1]:
-#             for vcv in var_edges[nod1][nod2]:
-#                 cvid = vcv['cvid']
-#                 ved = '{}-{}'.format(nod1, nod2)
-#                 if cvid not in esum:
-#                     esum[cvid] = {'ref': '-', 'alt': '-'}
-#                 if vcv['ref']:
-#                     esum[cvid]['ref'] = ved
-#                 else:
-#                     esum[cvid]['alt'] = ved
-#     matched_variants = []
-#     for varid in esum:
-#         if esum[varid]['ref'] != '-' and esum[varid]['alt'] != '-':
-#             matched_variants.append(varid)
-#             print('      {}\t{}\t{}'.format(varid,
-#                                             esum[varid]['ref'],
-#                                             esum[varid]['alt']))
-#     print("Matched {} input variants.".format(len(matched_variants)))
-#     # only return info about those variants
-#     var_edges_final = {}
-#     for nod1 in var_edges:
-#         var_edges_final[nod1] = {}
-#         for nod2 in var_edges[nod1]:
-#             var_edges_final[nod1][nod2] = []
-#             for vcv in var_edges[nod1][nod2]:
-#                 if vcv['cvid'] in matched_variants:
-#                     var_edges_final[nod1][nod2].append(vcv)
-#     return (var_edges_final)
-
-
 def gfaFile(config, fn='', prefix='', check_file=True):
+    """Returns the path to the most appropriate GFA
+
+    Checks, in that order, the provided filename, the provided prefix, the
+    config file.
+
+    Args:
+        config : dict with the configuration values (e.g. from input JSON)
+        fn : filename
+        prefix : label or prefix for this locus/experiment
+        check_file : check if the file exists?
+    """
     if fn == '':
         if prefix != '':
             fn = prefix + '.pg.gfa'
@@ -738,6 +678,17 @@ def gfaFile(config, fn='', prefix='', check_file=True):
 
 
 def nodeFile(config, fn='', prefix='', check_file=True):
+    """Returns the path to the most appropriate node info TSV
+
+    Checks, in that order, the provided filename, the provided prefix, the
+    config file.
+
+    Args:
+        config : dict with the configuration values (e.g. from input JSON)
+        fn : filename
+        prefix : label or prefix for this locus/experiment
+        check_file : check if the file exists?
+    """
     if fn == '':
         if prefix != '':
             fn = prefix + '.node_info.tsv'
@@ -753,6 +704,15 @@ def nodeFile(config, fn='', prefix='', check_file=True):
 
 
 def clinvarFile(fn, config, check_file=True):
+    """Returns the path to the most appropriate ClinVar annotation TSV
+
+    Checks, in that order, the provided filename, the config file.
+
+    Args:
+        config : dict with the configuration values (e.g. from input JSON)
+        fn : filename
+        check_file : check if the file exists?
+    """
     if fn == '' and 'clinvar' in config:
         fn = config['clinvar']
     if not os.path.isfile(fn) and check_file:
@@ -763,6 +723,15 @@ def clinvarFile(fn, config, check_file=True):
 
 
 def geneFile(fn, config, check_file=True):
+    """Returns the path to the most appropriate gene annotation file
+
+    Checks, in that order, the provided filename, the config file.
+
+    Args:
+        config : dict with the configuration values (e.g. from input JSON)
+        fn : filename
+        check_file : check if the file exists?
+    """
     if fn == '' and 'gene_annot' in config:
         fn = config['gene_annot']
     if not os.path.isfile(fn) and check_file:
@@ -773,6 +742,14 @@ def geneFile(fn, config, check_file=True):
 
 
 def prefixFile(config):
+    """Prepare a prefix for a project based on the config file
+
+    If label is not defined in the config JSON, makes sure we use a
+    consistent default.
+
+    Args:
+        config : dict with the configuration values
+    """
     fn = 'parakit.{}'.format(config['method'])
     if 'label' in config:
         fn = config['label']
@@ -780,6 +757,20 @@ def prefixFile(config):
 
 
 def writePathsInfo(paths_res, nodes, stats_fn, info_fn):
+    """Write inferred path information
+
+    Add some node information to a list of predicted paths and
+    evaluation metrics, and write them in two files: a "stats" file
+    with the diplotype pair evaluation, and a "info" file with the
+    nodes traversed by each path.
+
+    Args:
+        paths_res : dict with escores and paths produced by findPaths
+        nodes : dict with node information
+        stats_fn: output file name for the "stats" file (diplotype evaluation)
+        info_fn: output file name for the "info" file with path definition.
+
+    """
     escores_r = paths_res['escores']
     paths = paths_res['paths']
     # write ranked list
@@ -816,3 +807,80 @@ def writePathsInfo(paths_res, nodes, stats_fn, info_fn):
                                    nodes[nod]['rpos_min'],
                                    nodes[nod]['rpos_max']))
     outf.close()
+
+
+def readDiplotype(stats_fn, info_fn, verbose=False):
+    # read the stats file and extract the names of the best diplotype
+    hap_names = []
+    inf = open(stats_fn, 'rt')
+    for line in inf:
+        line = line.rstrip().split('\t')
+        if line[0] != 'hap1':
+            hap_names.append(line[0])
+            hap_names.append(line[1])
+            break
+    inf.close()
+    # read info and save path of the two haplotypes
+    dip_paths = {}
+    for hn in hap_names:
+        dip_paths[hn] = []
+    inf = open(info_fn, 'rt')
+    for line in inf:
+        line = line.rstrip().split('\t')
+        if line[0] in hap_names:
+            dip_paths[line[0]].append(line[1])
+    inf.close()
+    # print info
+    if verbose:
+        for hn in hap_names:
+            print('{}: {} nodes.'.format(hn, len(dip_paths[hn])))
+    return dip_paths
+
+
+def readGeneAnnotation(gene_fn, nodes, offset, gene_list=[]):
+    # read TSV file, keep only 'gene' and 'exon' line
+    inf = open(gene_fn, 'rt')
+    header = None
+    elts = []
+    for line in inf:
+        line = line.rstrip().split('\t')
+        if header is None:
+            header = {}
+            for idx, col in enumerate(line):
+                header[col] = idx
+            continue
+        # skip genes not in gene list
+        if len(gene_list) > 0 and line[header['gene_name']] not in gene_list:
+            continue
+        # keep if exon or gene record
+        if line[header['type']] in ['exon', 'gene']:
+            elt = {}
+            for col in header:
+                if col in ['start', 'end']:
+                    line[header[col]] = int(line[header[col]])
+                elt[col] = line[header[col]]
+            elts.append(elt)
+    inf.close()
+    # add start/end nodes
+    for node in nodes:
+        rpmin = nodes[node]['rpos_min'] + offset
+        rpmax = nodes[node]['rpos_max'] + offset
+        nsize = nodes[node]['size']
+        for elt in elts:
+            if (elt['start'] >= rpmin and
+                    elt['start'] < rpmin + nsize):
+                elt['node_start'] = node
+                elt['mod_start'] = 'c1'
+            elif (elt['start'] >= rpmax and
+                    elt['start'] < rpmax + nsize):
+                elt['node_start'] = node
+                elt['mod_start'] = 'c2'
+            if (elt['end'] >= rpmin and
+                    elt['end'] < rpmin + nsize):
+                elt['node_end'] = node
+                elt['mod_end'] = 'c1'
+            elif (elt['end'] >= rpmax and
+                    elt['end'] < rpmax + nsize):
+                elt['node_end'] = node
+                elt['mod_end'] = 'c2'
+    return elts

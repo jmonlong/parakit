@@ -457,7 +457,7 @@ def runRscript(script_r, args):
         if args.d == '' or args.p == '':
             print('This visualization mode requires paths input (-d and -p).')
             exit(1)
-        rscript_cmd += ['-d', args.d, '-p', args.p]
+        rscript_cmd += ['-d', args.d, '-p', args.p, '--dip', str(args.dip)]
         # check that there are diplotype to display
         if v_mode == 'diplotype':
             npaths = 0

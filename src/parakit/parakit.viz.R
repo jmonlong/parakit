@@ -21,6 +21,7 @@ args$scale = list(arg='-s', val='pangenome',
 args$label = list(arg='-l', desc='a label to use as title of the graphs', val='')
 args$hstats = list(arg='-d', desc='diplotype paths, sorted')
 args$hpaths = list(arg='-p', desc='haplotype paths information')
+args$dipid = list(arg='--dip', desc='diplotype index', val=1)
 args$out = list(arg='-o', desc='output PDF file', val='parakit.viz.pdf')
 
 ## parse arguments
@@ -155,12 +156,12 @@ callsGraph <- function(vars){
     merge(rl.df) %>%
     arrange(desc(length)) %>% group_by(variant) %>%
     do(head(., as.numeric(args$nreads$val))) %>% .$read
-  if(length(reads.to.plot) > 5){
-    reads.to.plot = head(reads.to.plot, 5)
-  }
+  ## if(length(reads.to.plot) > 5){
+  ##   reads.to.plot = head(reads.to.plot, 5)
+  ## }
 
   ## add the most 'normal'-looking reads to the call figure
-  if(args$viz$val == 'calls'){
+  if(args$viz$val == 'calls' || as.numeric(args$nreads$val) == 1){
     norm.reads = vars %>% group_by(read) %>%
       summarize(nref=sum(allele=='ref', na.rm=TRUE),
                 nalt=sum(allele=='alt', na.rm=TRUE), .groups='drop') %>%
@@ -446,19 +447,21 @@ diplotypeGraph <- function(stats, haps){
                 xlims_v=xlims_v))
   }
   ## if same haplotype selected twice, duplicate with a different name
-  if(stats$hap1[1] == stats$hap2[1]){
-    new_hapn = paste0(stats$hap1[1], '_d')
-    stats$hap2[1] = new_hapn
-    haps = haps %>% filter(hap==stats$hap1[1]) %>%
+  dipid = as.numeric(args$dipid$val)
+  if(stats$hap1[dipid] == stats$hap2[dipid]){
+    new_hapn = paste0(stats$hap1[dipid], '_d')
+    stats$hap2[dipid] = new_hapn
+    haps = haps %>% filter(hap==stats$hap1[dipid]) %>%
       mutate(hap=new_hapn) %>% rbind(haps)
   }
   ## keep info for the best pair only
-  haps = haps %>% filter(hap %in% c(stats$hap1[1], stats$hap2[1]))
+  haps.name = c(stats$hap1[dipid], stats$hap2[dipid])
+  haps = haps %>% filter(hap %in% haps.name)
   
   ## prep predicted haplotype paths
   ggp.haps.df = haps %>% mutate(class=factor(class, c('c1', 'none', 'c2'), c('1', 'both', '2')),
                                 ntype=ifelse(class!='both', 'module-specific', 'shared'),
-                                hap=factor(hap, levels=unique(hap), labels=c('hap_1', 'hap_2'))) %>% 
+                                hap=factor(hap, levels=haps.name, labels=c('hap_1', 'hap_2'))) %>% 
     filter(!is.na(class)) %>% arrange(class=='1', class=='2')
   ## add position for each node
   ggp.haps.df = ninfo %>% select(node, pos) %>% merge(ggp.haps.df)
@@ -761,6 +764,7 @@ nox = theme(axis.text.x=element_blank(), axis.title.x=element_blank())
 
 ## put the panels together
 pdf.h = ifelse(args$viz$val == 'all', 9, 6)
+pdf.h = ifelse(args$viz$val == 'diplotype', 4, pdf.h)
 pdf(args$out$val, 9, pdf.h)
 
 if(args$viz$val == 'allele_support'){
@@ -780,7 +784,7 @@ if(args$viz$val == 'calls'){
 }
 
 if(args$viz$val == 'diplotype'){
-  plot_grid(ggp$haps +
+  plot_grid(ggp$haps.s +
             ggp.xlims + nox,
             ggp$genes + ggp.xlims + labs(caption=args$label$val),
             ncol=1, align='v', rel_heights=c(2,1))

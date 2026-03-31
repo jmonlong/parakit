@@ -382,7 +382,8 @@ class ConvertedVariants:
             # look for a variant starting at that position and
             # with matching alt sequences
             if pos not in self.pos_to_varids:
-                # print('W: {} not matched (no variant at {})'.format(cvid, pos))
+                # print('W: {} not matched (no variant at '
+                #       '{})'.format(cvid, pos))
                 continue
             for varid in self.pos_to_varids[pos]:
                 if self.variants[varid].alt_seq == alt:
@@ -403,7 +404,6 @@ class ConvertedVariants:
                     # skip if there is no next node
                     # (the edge is used to match the allele)
                     continue
-                next_node = path[pos + 1]
                 if node not in self.node_to_varids:
                     # no variant starts at this node, skip
                     continue
@@ -416,7 +416,6 @@ class ConvertedVariants:
                     continue
                 # check if any variant matches
                 for varid in self.node_to_varids[node]:
-                    var = self.variants[varid]
                     # check that it's the appropriate conversion
                     if reg_copy != self.variants[varid].copy:
                         continue
