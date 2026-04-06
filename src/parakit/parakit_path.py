@@ -2,12 +2,12 @@ import parakit.parakit_path_original as pkpo
 import statistics as stat
 import math
 import random
-# import networkx as nx
+import networkx
 
 DEBUG = False
 
 
-def findPaths(nodes, reads, args):
+def findPaths(nodes, reads, config, args):
     """Find paths through the pangenome from read alignment
 
     This is the main function that will call the different approaches to
@@ -25,12 +25,8 @@ def findPaths(nodes, reads, args):
                                     hap1, hap2, hap_ll, cov_cor, aln_score
                 paths : dict path name -> list of nodes
     """
-    if args.c == 0:
-        print('Error: minimum read support -c must be greater than 0')
-        exit(1)
     if args.t:
         print("Enumerating candidate haplotypes..")
-        print("\tMinimum read support: {}".format(args.c))
     # upate nodes with read info
     for readn in reads.path:
         path = reads.path[readn]
@@ -47,14 +43,14 @@ def findPaths(nodes, reads, args):
                 # two modes to cluster the reads in module-alleles by
                 # default, the first one implemented iteratively
                 # splits clusters in two
-    args_m = args.m if args.m else '50,50'
-    args_m = args_m.split(',')
+    args_m = args.m if args.m else 'default'
+    initConfPath(config)
     cl_o = None
-    if len(args_m) == 2:
+    if args_m == 'original':
         # once at most max_cls candidate clusters are enumerated
         # they are combined into at most max_haps haplotypes
-        max_cls = int(args_m[0])
-        max_haps = int(args_m[1])
+        max_cls = 50
+        max_haps = 50
         # first cluster subreads
         cl_o = pkpo.biClusterSubreads(nodes, reads,
                                       min_read_support=args.c,
@@ -62,19 +58,9 @@ def findPaths(nodes, reads, args):
                                       max_cycles=4,
                                       max_haps=max_haps,
                                       verbose=args.t)
-    else:
-        # this is the EM algorithm that will test different module copy
-        # number (from min_modc, to max_modc). n_em_cand repetitions will
-        # be run for each copy number
-        min_modc = int(args_m[0])
-        max_modc = int(args_m[1])
-        n_em_cand = int(args_m[2])
-        cl_o = clusterSubreadsEM(nodes, reads,
-                                 min_read_support=args.c,
-                                 min_module_copies=min_modc,
-                                 max_module_copies=max_modc,
-                                 ncandidates=n_em_cand,
-                                 verbose=args.t)
+    elif args_m in config['diplotype_args']:
+        conf = config['diplotype_args'][args_m]
+        cl_o = clusterSubreads(nodes, reads, conf, verbose=args.t)
 
     # evaluate pairs of path
     if args.t:
@@ -162,9 +148,115 @@ def findPaths(nodes, reads, args):
     return ({'escores': escores_r, 'paths': cl_o['paths']})
 
 
-def clusterSubreadsEM(nodes, reads, min_read_support=3, min_module_copies=1,
-                      max_module_copies=6, ncandidates=3, verbose=False):
-    """Run the EM subread clustered on a range of parameters
+def clusterSubreads(nodes, reads, config, verbose=False):
+    """Run the subread clusterer on a range of parameters
+
+    Cluster subreads using the both EM and network approaches. Test
+    multiple parameters for the number of clusters (from
+    min_module_copies to max_module_copies).
+
+    Args:
+        nodes : dict with node information
+        reads : Reads object
+        method: both, em, or kcomms
+        min_read_support* : range for the min read support to define markers?
+        module_copies* : range for the number of copies/modules to consider
+        min_read_len* : range for the min read length
+        min_mark_supp* : range for the minimum marker support (quantile)
+        verbose : show informative message. Default: False
+
+    Returns: a dict with 'paths' -> path for each haplotype
+                         'hap_pairs' -> list of list with haplotype names
+
+    """
+    # prepare the parameter lists
+    read_supp_l = list(range(config['min_read_support_l'],
+                             config['min_read_support_u'] + 1))
+    read_len_l = list(range(config['min_read_len_l'],
+                            config['min_read_len_u'] + 1,
+                            config['min_read_len_s']))
+    module_l = list(range(config['module_copies_l'],
+                          config['module_copies_u'] + 1))
+    mark_supp_l = seq(config['min_mark_supp_l'],
+                      config['min_mark_supp_u'],
+                      config['min_mark_supp_s'])
+    method = config['method']
+    # prepare markers
+    marker_finder = MarkerFinder(nodes)
+    marker_finder.findMarkers()
+    if verbose:
+        print('\tClustering subreads...')
+    # list of subreads clusters
+    paths = {}
+    hap_pair_names = []
+    for min_read_len in read_len_l:
+        print('\t\tMin read length: {}...'.format(min_read_len))
+        # init subreads
+        sreads = Subreads()
+        sreads.splitReads(reads, nodes, min_read_len=min_read_len)
+        for min_read_support in read_supp_l:
+            print('\t\t\tMin read support: {}...'.format(min_read_support))
+            sreads.profileSubreads(marker_finder,
+                                   min_read_support=min_read_support)
+            for nmodules in module_l:
+                if verbose:
+                    print('\t\t\t\t{} module(s)...'.format(nmodules))
+                if method == 'kcomms' or method == 'both':
+                    # read similarity clustering
+                    rs = ReadSimilarity()
+                    rs.compareReads(sreads)
+                    for min_mark_supp in mark_supp_l:
+                        min_mark_supp = round(min_mark_supp, 1)
+                        rs.adjustSimilarity(nmodules,
+                                            min_markers=min_mark_supp)
+                        if verbose:
+                            print('\t\t\t\t\t{} marker support..'
+                                  '.'.format(min_mark_supp))
+                        ncomms = rs.clusterSubreads(sreads)
+                        if verbose:
+                            sreads.print()
+                        cpaths = sreads.threadDiplotype(nodes)
+                        hpair_names = []
+                        path_tpl = '{}m_rl{}_rs{}_ms{}_{}'
+                        for pathn in cpaths:
+                            new_pathn = path_tpl.format(ncomms, min_read_len,
+                                                        min_read_support,
+                                                        min_mark_supp,
+                                                        pathn)
+                            paths[new_pathn] = cpaths[pathn]
+                            hpair_names.append(new_pathn)
+                        if len(hpair_names) > 0:
+                            hap_pair_names.append(hpair_names)
+                if method == 'em' or method == 'both':
+                    # EM clustering
+                    sreads.clearClusters()
+                    sreads.clusterSubreads(nmodules)
+                    if verbose:
+                        sreads.print()
+                    cpaths = sreads.threadDiplotype(nodes)
+                    hpair_names = []
+                    path_tpl = '{}m_rl{}_rs{}_{}'
+                    for pathn in cpaths:
+                        new_pathn = path_tpl.format(nmodules, min_read_len,
+                                                    min_read_support, pathn)
+                        paths[new_pathn] = cpaths[pathn]
+                        hpair_names.append(new_pathn)
+                    if len(hpair_names) > 0:
+                        hap_pair_names.append(hpair_names)
+    # return results
+    res = {}
+    res['paths'] = paths
+    res['hap_pairs'] = hap_pair_names
+    return (res)
+
+
+def clusterSubreadsEM(nodes, reads,
+                      min_read_support_l=3, min_read_support_u=3,
+                      min_read_len_l=0, min_read_len_u=10000,
+                      min_read_len_s=2000,
+                      module_copies_l=1, module_copies_u=6,
+                      verbose=False):
+    """Run the EM subread clusterer on a range of parameters
 
     Cluster subreads using the EM approach. Test multiple parameters
     for the number of clusters (from min_module_copies to
@@ -182,74 +274,150 @@ def clusterSubreadsEM(nodes, reads, min_read_support=3, min_module_copies=1,
     Returns: a dict with 'paths' -> path for each haplotype
                          'hap_pairs' -> list of list with haplotype names
     """
-    module_copies = list(range(min_module_copies, max_module_copies + 1))
-    # init subreads
-    sreads = Subreads()
-    sreads.splitReads(reads, nodes)
+    # prepare the parameter lists
+    read_supp_l = list(range(min_read_support_l, min_read_support_u + 1))
+    read_len_l = list(range(min_read_len_l, min_read_len_u + 1,
+                            min_read_len_s))
+    module_l = list(range(module_copies_l, module_copies_u + 1))
     # prepare markers
     marker_finder = MarkerFinder(nodes)
     marker_finder.findMarkers()
-    sreads.profileSubreads(marker_finder, min_read_support=min_read_support)
     if verbose:
-        print('\t\tClustering subreads...')
+        print('\tClustering subreads...')
     # list of subreads clusters
-    # try to cluster in K profiles, K being any possible module number
     paths = {}
     hap_pair_names = []
-    for nmodules in module_copies:
-        # run the greedy clusterer?
-        if ncandidates >= 0:
-            if verbose:
-                print('\t\t\t{} module(s) (greedy)...'.format(nmodules))
-            sreads.clearClusters()
-            sreads.clusterSubreadsGreedy(nmodules)
-            if verbose:
-                sreads.print()
-            cpaths = sreads.threadDiplotype(nodes)
-            hpair_names = []
-            for pathn in cpaths:
-                new_pathn = '{}m_greedy_{}'.format(nmodules, pathn)
-                paths[new_pathn] = cpaths[pathn]
-                hpair_names.append(new_pathn)
-            if len(hpair_names) > 0:
-                hap_pair_names.append(hpair_names)
-            if verbose:
-                print('\t\t\t{} module(s) (phase block merging)'
-                      '...'.format(nmodules))
-            sreads.clearClusters()
-            sreads.clusterSubreadsPhaseBlockMerging(nmodules)
-            if verbose:
-                sreads.print()
-            cpaths = sreads.threadDiplotype(nodes)
-            hpair_names = []
-            for pathn in cpaths:
-                new_pathn = '{}m_pb_{}'.format(nmodules, pathn)
-                paths[new_pathn] = cpaths[pathn]
-                hpair_names.append(new_pathn)
-            if len(hpair_names) > 0:
-                hap_pair_names.append(hpair_names)
-        # skip EM if candidate number is 0
-        if ncandidates == 0:
-            continue
-        # let's cluster the subreads multiple times to get
-        # more than one candidate
-        for ncand in range(ncandidates):
-            if verbose:
-                print('\t\t\t{} module(s) ({}/{})...'.format(nmodules,
-                                                             ncand + 1,
-                                                             ncandidates))
-            sreads.clearClusters()
-            sreads.clusterSubreads(nmodules)
-            if verbose:
-                sreads.print()
-            cpaths = sreads.threadDiplotype(nodes)
-            hpair_names = []
-            for pathn in cpaths:
-                new_pathn = '{}m_c{}_{}'.format(nmodules, ncand, pathn)
-                paths[new_pathn] = cpaths[pathn]
-                hpair_names.append(new_pathn)
-            if len(hpair_names) > 0:
-                hap_pair_names.append(hpair_names)
+    for min_read_len in read_len_l:
+        print('\t\tMin read length: {}...'.format(min_read_len))
+        # init subreads
+        sreads = Subreads()
+        sreads.splitReads(reads, nodes, min_read_len=min_read_len)
+        for min_read_support in read_supp_l:
+            print('\t\t\tMin read support: {}...'.format(min_read_support))
+            sreads.profileSubreads(marker_finder,
+                                   min_read_support=min_read_support)
+            for nmodules in module_l:
+                # simple EM algorithm
+                if verbose:
+                    print('\t\t\t\t{} module(s)...'.format(nmodules))
+                sreads.clearClusters()
+                sreads.clusterSubreads(nmodules)
+                if verbose:
+                    sreads.print()
+                cpaths = sreads.threadDiplotype(nodes)
+                hpair_names = []
+                path_tpl = '{}m_em_rl{}_rs{}_{}'
+                for pathn in cpaths:
+                    new_pathn = path_tpl.format(nmodules, min_read_len,
+                                                min_read_support, pathn)
+                    paths[new_pathn] = cpaths[pathn]
+                    hpair_names.append(new_pathn)
+                if len(hpair_names) > 0:
+                    hap_pair_names.append(hpair_names)
+                # # iteratively combine phase blocks
+                # if verbose:
+                #     print('\t\t\t\t{} module(s) (phase block merging)'
+                #           '...'.format(nmodules))
+                # sreads.clearClusters()
+                # sreads.clusterSubreadsPhaseBlockMerging(nmodules)
+                # if verbose:
+                #     sreads.print()
+                # cpaths = sreads.threadDiplotype(nodes)
+                # hpair_names = []
+                # path_tpl = '{}m_pb_rl{}_rs{}_{}'
+                # for pathn in cpaths:
+                #     new_pathn = path_tpl.format(nmodules, min_read_len,
+                #                                 min_read_support, pathn)
+                #     paths[new_pathn] = cpaths[pathn]
+                #     hpair_names.append(new_pathn)
+                # if len(hpair_names) > 0:
+                #     hap_pair_names.append(hpair_names)
+    # return results
+    res = {}
+    res['paths'] = paths
+    res['hap_pairs'] = hap_pair_names
+    return (res)
+
+
+def clusterSubreadsNetwork(nodes, reads,
+                           min_read_support_l=3, min_read_support_u=3,
+                           min_read_len_l=0, min_read_len_u=10000,
+                           min_read_len_s=2000,
+                           min_mark_supp_l=0, min_mark_supp_u=.9,
+                           min_mark_supp_s=.3,
+                           module_copies_l=1, module_copies_u=6,
+                           verbose=False):
+    """Run the network subread clusterer on a range of parameters
+
+    Cluster subreads using community detection on a subread
+    network. Test multiple parameters for the number of clusters,
+    minimum read support to define markers, minimum marker support to
+    define subread overlaps
+
+    Args:
+        nodes : dict with node information
+        reads : Reads object
+        min_read_support : minimum read support to define markers?
+        min_module_copies : minimum number of copies N to consider
+        max_module_copies : maximum number of copies N to consider
+        ncandidates : number of candidates generated for each N
+        verbose : show informative message. Default: False
+
+    Returns: a dict with 'paths' -> path for each haplotype
+                         'hap_pairs' -> list of list with haplotype names
+
+    """
+    # prepare the parameter lists
+    read_supp_l = list(range(min_read_support_l, min_read_support_u + 1))
+    read_len_l = list(range(min_read_len_l, min_read_len_u + 1,
+                            min_read_len_s))
+    mark_supp_l = seq(min_mark_supp_l, min_mark_supp_u,
+                      min_mark_supp_s)
+    module_l = list(range(module_copies_l, module_copies_u + 1))
+    # prepare markers
+    marker_finder = MarkerFinder(nodes)
+    marker_finder.findMarkers()
+    if verbose:
+        print('\tClustering subreads...')
+    # list of subreads clusters
+    paths = {}
+    hap_pair_names = []
+    for min_read_len in read_len_l:
+        print('\t\tMin read length: {}...'.format(min_read_len))
+        # init subreads
+        sreads = Subreads()
+        sreads.splitReads(reads, nodes, min_read_len=min_read_len)
+        for min_read_support in read_supp_l:
+            print('\t\t\tMin read support: {}...'.format(min_read_support))
+            sreads.profileSubreads(marker_finder,
+                                   min_read_support=min_read_support)
+            for nmodules in module_l:
+                if verbose:
+                    print('\t\t\t\t{} module(s)...'.format(nmodules))
+                # read similarity clustering
+                rs = ReadSimilarity()
+                rs.compareReads(sreads)
+                for min_mark_supp in mark_supp_l:
+                    min_mark_supp = round(min_mark_supp, 1)
+                    rs.adjustSimilarity(nmodules, min_markers=min_mark_supp)
+                    if verbose:
+                        print('\t\t\t\t\t{} marker support..'
+                              '.'.format(min_mark_supp))
+                    ncomms = rs.clusterSubreads(sreads)
+                    if verbose:
+                        sreads.print()
+                    cpaths = sreads.threadDiplotype(nodes)
+                    hpair_names = []
+                    path_tpl = '{}m_em_rl{}_rs{}_ms{}_{}'
+                    for pathn in cpaths:
+                        new_pathn = path_tpl.format(ncomms, min_read_len,
+                                                    min_read_support,
+                                                    min_mark_supp,
+                                                    pathn)
+                        paths[new_pathn] = cpaths[pathn]
+                        hpair_names.append(new_pathn)
+                    if len(hpair_names) > 0:
+                        hap_pair_names.append(hpair_names)
     # return results
     res = {}
     res['paths'] = paths
@@ -548,67 +716,6 @@ class Subread:
         return obs
 
 
-# class NetworkBiClusterer:
-#     def __init__(self):
-#         self.edge_count = {}
-#         self.vertex_col = {}
-#         self.edge_to_vert = {}
-
-#     def print(self):
-#         blocks = [str(bb) for bb in self.vertex_col]
-#         print('NetworkBiClusterer with {} blocks'
-#               ': {}.'.format(len(blocks), ', '.join(blocks)))
-
-#     def addNode(self, elt):
-#         if elt not in self.vertex_col:
-#             self.vertex_col[elt] = len(self.vertex_col)
-
-#     def addEdge(self, elt1, elt2):
-#         ename = '{}_{}'.format(elt1, elt2)
-#         if elt1 > elt2:
-#             ename = '{}_{}'.format(elt2, elt1)
-#         if ename not in self.edge_to_vert:
-#             self.edge_to_vert[ename] = [elt1, elt2]
-#             self.edge_count[ename] = 0
-#         self.edge_count[ename] += 1
-#         if elt1 not in self.vertex_col:
-#             self.vertex_col[elt1] = len(self.vertex_col)
-#         if elt2 not in self.vertex_col:
-#             self.vertex_col[elt2] = len(self.vertex_col)
-
-#     def biCluster(self):
-#         ncolors = len(self.vertex_col)
-#         # sort edges by counts
-#         edge_count_s = sorted(self.edge_count, reverse=True)
-#         # iteratively merge
-#         cur_edge_ii = 0
-#         while ncolors > 2 and cur_edge_ii < len(edge_count_s):
-#             # combine next most supported edge
-#             elts = self.edge_to_vert[edge_count_s[cur_edge_ii]]
-#             if self.vertex_col[elts[0]] != self.vertex_col[elts[1]]:
-#                 # change the color of the second element
-#                 col_mod = self.vertex_col[elts[1]]
-#                 new_col = self.vertex_col[elts[0]]
-#                 for elt in self.vertex_col:
-#                     if self.vertex_col[elt] == col_mod:
-#                         self.vertex_col[elt] = new_col
-#                 ncolors += -1
-#             cur_edge_ii += 1
-#         # TODO ideally recompute the support after each merge
-#         # make two lists
-#         colors = set()
-#         for elt in self.vertex_col:
-#             colors.add(self.vertex_col[elt])
-#         res = []
-#         for col in colors:
-#             col_elts = set()
-#             for elt in self.vertex_col:
-#                 if self.vertex_col[elt] == col:
-#                     col_elts.add(elt)
-#             res.append(col_elts)
-#         return res
-
-
 class Subreads:
     """Set of subreads that can be clustered
 
@@ -675,7 +782,7 @@ class Subreads:
         for sreadn in self.sreads:
             self.sreads[sreadn].clearCluster()
 
-    def splitReads(self, reads, nodes):
+    def splitReads(self, reads, nodes, min_read_len=0):
         # find cycle's boundaries and start node
         cyc_l = None
         cyc_r = None
@@ -737,6 +844,9 @@ class Subreads:
             node = nnode
         # process each read
         for readn in reads.path:
+            # skip is read is too short
+            if reads.read_len[readn] < min_read_len:
+                continue
             # skip if read with no informative nodes
             any_inf_nodes = False
             for nod in reads.path[readn]:
@@ -817,120 +927,26 @@ class Subreads:
             self.read_prof[sreadn].removePositions(pos_to_rm)
 
     def clusterSubreads(self, n_clusters):
-        # run EM to create profiles
-        best_em = None
-        # init the number of differences with a high number
-        best_em_ndiff = None
-        # try a couple of attempts and keep the best
-        # should be enough to try ~25 attempts with ~40 iterations
-        for attempt in range(20):
-            # init the EM profiles with 10 states
-            em = EM(self.pos_alleles, n_clusters)
-            # iterate
-            for iter in range(40):
-                em.updateWithObs(self.read_prof, init=iter == 0)
-            em.consensusWithObs(self.read_prof)
-            ndiffs = em.computeReadDiff(self.read_prof)
-            ndiff = ndiffs['ndiffs']
-            if best_em_ndiff is None or ndiff < best_em_ndiff:
-                best_em_ndiff = ndiff
-                best_em = em
-            attempt += 1
-        # ndiffs = best_em.computeReadDiff(self.read_prof)
-        # cn = best_em.estimateCopyNumber(ndiffs)
-        # print('Copy number: {}'.format(cn))
-        # for key in ndiffs:
-        #     print('{}: {}'.format(key, ndiffs[key]))
+        # init the EM profiles with N states
+        em = EM(self.pos_alleles, n_clusters)
+        for inner_iter in range(10):
+            # em.updateWithObs(self.read_prof)
+            em.consensusWithObs(self.read_prof, trim_probs=.2)
+        em.consensusWithObs(self.read_prof)
         # assign clusters based on best profile
         for sreadn in self.read_prof:
             ob = self.read_prof[sreadn]
             # find the best profile
-            ob.findBestEMProfile(best_em)
-            self.sreads[sreadn].assignCluster(ob.profile, ob.profile_conf)
-
-    def clusterSubreadsEMsupp(self, n_clusters):
-        # run EM to create profiles
-        best_em = None
-        best_em_ndiff = None
-        # try a couple of attempts and keep the best
-        # should be enough to try ~25 attempts with ~40 iterations
-        for attempt in range(50):
-            # init the EM profiles with 10 states
-            em = EM(self.pos_alleles, n_clusters)
-            # iterate
-            for iter in range(100):
-                em.updateWithObs(self.read_prof, init=iter == 0)
-            em.consensusWithObs(self.read_prof)
-            ndiffs = em.computeReadDiff(self.read_prof)
-            ndiff = ndiffs['ndiffs']
-            if best_em_ndiff is None or ndiff < best_em_ndiff:
-                best_em_ndiff = ndiff
-                best_em = em
-            attempt += 1
-        # remove states that are not covered enough
-        ndiffs = best_em.computeReadDiff(self.read_prof)
-        best_em.keepSuppStates(ndiffs)
-        # assign clusters based on best profile
-        for sreadn in self.read_prof:
-            ob = self.read_prof[sreadn]
-            # find the best profile
-            ob.findBestEMProfile(best_em)
-            self.sreads[sreadn].assignCluster(ob.profile, ob.profile_conf)
-
-    def clusterSubreadsEMtarget(self, n_clusters):
-        # run EM to create profiles
-        best_em = None
-        # init the number of differences with a high number
-        best_em_ndiff = None
-        # try a couple of attempts and keep the best
-        # should be enough to try ~25 attempts with ~40 iterations
-        attempt = 0
-        while attempt < 10:
-            # init the EM profiles with 10 states
-            em = EM(self.pos_alleles, 8)
-            # iterate
-            for iter in range(20):
-                em.updateWithObs(self.read_prof, init=iter == 0)
-            em.consensusWithObs(self.read_prof)
-            ndiffs = em.computeReadDiff(self.read_prof)
-            # record copy number estimate
-            cn = em.estimateCopyNumber(ndiffs)
-            if cn != n_clusters:
-                continue
-            # remove a state until the proprer number
-            em.keepSuppStates(ndiffs)
-            for iter in range(20):
-                em.updateWithObs(self.read_prof)
-            em.consensusWithObs(self.read_prof)
-            ndiffs = em.computeReadDiff(self.read_prof)
-            ndiff = ndiffs['ndiffs']
-            if best_em_ndiff is None or ndiff < best_em_ndiff:
-                best_em_ndiff = ndiff
-                best_em = em
-            attempt += 1
-        ndiffs = best_em.computeReadDiff(self.read_prof)
-        # assign clusters based on best profile
-        for sreadn in self.read_prof:
-            ob = self.read_prof[sreadn]
-            # find the best profile
-            ob.findBestEMProfile(best_em)
-            self.sreads[sreadn].assignCluster(ob.profile, ob.profile_conf)
-
-    def clusterSubreadsGreedy(self, n_clusters):
-        # start with one profile
-        clusterer = GreedyMarkerBiClusterer(self.read_prof)
-        # iteratively split the profile with most assigned reads
-        while clusterer.nstates < n_clusters:
-            clusterer.splitProfile(self.read_prof)
-            # polish the profiles with the EM approach?
-            for ii in range(10):
-                clusterer.updateWithObs(self.read_prof)
-            clusterer.consensusWithObs(self.read_prof)
-        # assign clusters based on best profile
-        for sreadn in self.read_prof:
-            ob = self.read_prof[sreadn]
-            # find the best profile
-            ob.findBestEMProfile(clusterer)
+            mll = em.computeReadLL(ob)
+            best_ll = None
+            best_prof = None
+            for ii in range(len(mll)):
+                if best_ll is None or best_ll < mll[ii]:
+                    best_ll = mll[ii]
+                    best_prof = ii
+            ob.profile = best_prof
+            mll.sort(reverse=True)
+            ob.profile_conf = mll[0] - mll[1]
             self.sreads[sreadn].assignCluster(ob.profile, ob.profile_conf)
 
     def clusterSubreadsPhaseBlockMerging(self, n_clusters):
@@ -1018,7 +1034,8 @@ class Subreads:
         cls = set()
         for sreadn in self.sreads:
             # skip if not within the module
-            if not self.sreads[sreadn].in_module:
+            if (not self.sreads[sreadn].in_module
+                    or self.sreads[sreadn].cluster is None):
                 continue
             cls.add(self.sreads[sreadn].cluster)
         # find the first cycle boundary
@@ -1086,8 +1103,7 @@ class Subreads:
         for readn in self.read_to_sub:
             md.addRead(self.read_to_sub[readn], self.sreads)
         md.prepareDiplotypes()
-        if DEBUG:
-            md.print()
+        md.print(long=True)
         best_dip = md.findBestDiplotype()
         # prepare full haplotype paths
         res = {}
@@ -1332,548 +1348,154 @@ class EM:
     to best profile and update profile.
 
     Attributes:
-        prof : the profiles as a dict of list. Use as prof[position][state]
+        prof : profile probabilities (prof[state][position][allele] in [0,1])
         nstates : number of profiles to consider
         marker_values : a dict pos -> set of the values each marker can take
 
     Methods:
-        constructor : init the profiles with random values
+        constructor : init the profiles with uniform priors
         updateWithObs : run a round of direct profile updates from Observations
         consensusWithObs : assign Observations and update consensus profile
-        compareWithTruth : helper function to benchmark with a truth profile
-
     """
 
     def __init__(self, marker_values, nstates_per_pos):
-        self.prof = {}
+        self.prof = []
         self.nstates = nstates_per_pos
         self.marker_values = marker_values
-        for pos in marker_values:
-            vals = []
-            vals_space = list(self.marker_values[pos])
-            for state in range(self.nstates):
-                # init with a random value
-                vals.append(random.sample(vals_space, 1)[0])
-            self.prof[pos] = vals
+        for state in range(self.nstates):
+            sprof = {}
+            for pos in marker_values:
+                sprof[pos] = {}
+                for al in self.marker_values[pos]:
+                    sprof[pos][al] = 1 / len(self.marker_values[pos])
+            self.prof.append(sprof)
 
     def print(self, digits=4):
         for pos in self.marker_values:
             tp = []
-            for val in self.prof[pos]:
-                tp.append('{}'.format(val))
+            for state in range(self.nstates):
+                tps = []
+                for al in self.marker_values[pos]:
+                    tps.append(str(round(self.prof[state][pos][al], 3)))
+                tp.append('/'.join(tps))
             print('S{}:\t'.format(pos) + '  '.join(tp))
 
-    def updateWithObs(self, obs, long_reads_first=False, init=False):
-        obs_names = list(obs.keys())
-        if long_reads_first:
-            obs_names = sorted(list(obs.keys()), key=lambda k: -obs[k].size())
-        else:
-            random.shuffle(obs_names)
-        # loop over observations and integrate them one by one
-        for obsn in obs_names:
-            ob = obs[obsn]
-            # find the best profile
-            ob.findBestEMProfile(self, include_none=init)
-            # overwrite profile
+    def computeReadLL(self, ob):
+        """Compute the log likelihoood of an observation and each profile"""
+        # compute first probability for each state
+        logl = []
+        for state in range(self.nstates):
+            # multiply probabilities at each position
+            ll_state = 0
             for pos in ob.pos_val:
-                self.prof[pos][ob.profile] = ob.pos_val[pos]
-
-    def consensusWithObs(self, obs):
-        # loop over observations, assign, and tally
-        counts = {}
-        for obn in obs:
-            ob = obs[obn]
-            # find the best profile
-            ob.findBestEMProfile(self)
-            # count each type of marker at each position of this profile
-            for pos in ob.pos_val:
-                oname = '{}_{}'.format(pos, ob.profile)
-                if oname not in counts:
-                    counts[oname] = {}
-                if ob.pos_val[pos] not in counts[oname]:
-                    counts[oname][ob.pos_val[pos]] = 0
-                counts[oname][ob.pos_val[pos]] += 1
-        # pick the most supported value for each profile position
-        for pp in self.prof:
-            for state in range(self.nstates):
-                top_val = None
-                top_val_c = 0
-                oname = '{}_{}'.format(pp, state)
-                if oname not in counts:
+                # skip if not a position in this block
+                if pos not in self.prof[state]:
                     continue
-                for val in counts[oname]:
-                    if top_val is None or counts[oname][val] > top_val_c:
-                        top_val_c = counts[oname][val]
-                        top_val = val
-                if top_val is not None:
-                    self.prof[pp][state] = top_val
-
-    def computeReadDiff(self, obs):
-        # loop over observations, assign, and tally
-        ndiffs = 0
-        cl_ndiffs = {}
-        supp = {}
-        for prof in range(self.nstates):
-            cl_ndiffs[prof] = {'ndiffs': 0, 'nmatch': 0, 'conf': 0}
-            supp[prof] = {}
-        for obn in obs:
-            ob = obs[obn]
-            # find the best profile
-            ob.findBestEMProfile(self)
-            # if ob.profile_conf == 0:
-            #     continue
-            cl_ndiffs[ob.profile]['conf'] += ob.profile_conf
-            # count each type of marker at each position of this profile
-            for pos in ob.pos_val:
-                if ob.pos_val[pos] != self.prof[pos][ob.profile]:
-                    ndiffs += 1
-                    cl_ndiffs[ob.profile]['ndiffs'] += 1
-                else:
-                    if pos not in supp[ob.profile]:
-                        supp[ob.profile][pos] = 0
-                    supp[ob.profile][pos] += 1
-                    cl_ndiffs[ob.profile]['nmatch'] += 1
-        # compute support for each position in the profile
-        for state in range(self.nstates):
-            supp_v = []
-            supp_c = 0
-            for pos in self.prof:
-                if pos in supp[state]:
-                    supp_v.append(supp[state][pos])
-                    supp_c += 1
-                else:
-                    supp_v.append(0)
-            cl_ndiffs[state]['nsupp'] = supp_c
-            cl_ndiffs[state]['nsupp_mean'] = sum(supp_v) / len(supp_v)
-            ntot = cl_ndiffs[state]['ndiffs'] + cl_ndiffs[state]['nmatch']
-            if ntot > 0:
-                mprop = round(cl_ndiffs[state]['nmatch'] / ntot, 4)
-                cl_ndiffs[state]['match_prop'] = mprop
-            else:
-                cl_ndiffs[state]['match_prop'] = 0
-        cl_ndiffs['ndiffs'] = ndiffs
-        return (cl_ndiffs)
-
-    def removeOneState(self, ndiffs):
-        # find the state with least support
-        supp_min = None
-        supp2_min = None
-        st_to_rm = None
-        for state in range(self.nstates):
-            if (supp_min is None or supp_min > ndiffs[state]['nsupp']
-                    or (supp_min == ndiffs[state]['nsupp']
-                        and supp2_min > ndiffs[state]['nmatch'])):
-                supp_min = ndiffs[state]['nsupp']
-                supp2_min = ndiffs[state]['nmatch']
-                st_to_rm = state
-        # make a new profile without this state
-        prof = {}
-        for pos in self.prof:
-            prof[pos] = []
-            for state in range(self.nstates):
-                if state == st_to_rm:
-                    continue
-                prof[pos].append(self.prof[pos][state])
-        # update state number
-        self.nstates += -1
-
-    def keepSuppStates(self, ndiffs):
-        # find the state with least support
-        max_supp = None
-        for state in range(self.nstates):
-            if max_supp is None or max_supp < ndiffs[state]['nsupp']:
-                max_supp = ndiffs[state]['nsupp']
-        # how many states with about the maximum support
-        st_to_keep = []
-        for state in range(self.nstates):
-            if 0.9 * max_supp < ndiffs[state]['nsupp']:
-                st_to_keep.append(state)
-        # make a new profile without this state
-        prof = {}
-        for pos in self.prof:
-            prof[pos] = []
-            for state in range(self.nstates):
-                if state == st_to_keep:
-                    prof[pos].append(self.prof[pos][state])
-        # update state number
-        self.nstates = len(st_to_keep)
-
-    def estimateCopyNumber(self, ndiffs):
-        # supps = []
-        # find the state with least support
-        max_supp = None
-        for state in range(self.nstates):
-            if max_supp is None or max_supp < ndiffs[state]['nsupp']:
-                max_supp = ndiffs[state]['nsupp']
-            # supps.append(ndiffs[state]['nsupp'])
-        # supps.sort()
-        # print(supps)
-        # how many states with about the maximum support
-        nsupp = 0
-        for state in range(self.nstates):
-            if 0.9 * max_supp < ndiffs[state]['nsupp']:
-                nsupp += 1
-        return nsupp
-
-    def compareWithTruth(self, hap_truth):
-        # compare each profile to each true haplotype
-        best_truth = [-1] * self.nstates
-        best_truth_match = [0] * self.nstates
-        for prof_ii in range(self.nstates):
-            for truth_ii in range(len(hap_truth)):
-                nmatch = 0
-                for pos in self.marker_values:
-                    if self.prof[pos][prof_ii] == hap_truth[truth_ii][pos]:
-                        nmatch += 1
-                if nmatch > best_truth_match[prof_ii]:
-                    best_truth_match[prof_ii] = nmatch
-                    best_truth[prof_ii] = truth_ii
-        # any true haplotype not found
-        missing_truth = []
-        for truth_ii in range(len(hap_truth)):
-            if truth_ii not in best_truth:
-                missing_truth.append(truth_ii)
-        # print profile next to their most similar true haplotype
-        tp = 'read\t'
-        for prof_ii in range(self.nstates):
-            tp += '  {}/{}'.format(prof_ii, best_truth[prof_ii])
-        tp += '\t'
-        for truth_ii in missing_truth:
-            tp += '  {}'.format(truth_ii)
-        print(tp)
-        print('---')
-        for pp in self.marker_values:
-            tp = str(pp) + '\t'
-            for p_ii in range(self.nstates):
-                match_s = 'x'
-                if self.prof[pp][p_ii] == hap_truth[best_truth[p_ii]][pp]:
-                    match_s = '='
-                tp += '  {}{}{}'.format(self.prof[pp][p_ii], match_s,
-                                        hap_truth[best_truth[p_ii]][pp])
-            tp += '\t'
-            for truth_ii in missing_truth:
-                tp += '  {}'.format(hap_truth[truth_ii][pp])
-            print(tp)
-
-
-class Segment:
-    """A phased segment object used to split profiles
-
-    A segment is just a pair of alleles for a set of positions. It's
-    used in the profile splitter where we start with single-position
-    segments and iteratively combine pairs based on the "phasing"
-    information from the reads.
-
-    Attributes:
-        al1 : dict pos->allele for each position for the first haplotype
-        al2 : dict pos->allele for each position for the second haplotype
-
-    Methods:
-        constructor : init with one position and two alleles
-        combineSegment : combine another Segment with this one
-    """
-
-    def __init__(self, pos, al1, al2):
-        self.al1 = {}
-        self.al1[pos] = al1
-        self.al2 = {}
-        self.al2[pos] = al2
-
-    def print(self):
-        pos_sum = []
-        for pos in self.al1:
-            if len(pos_sum) > 3:
-                break
-            pos_sum.append(pos)
-        pos_sum = ', '.join(pos_sum)
-        print('Segment with {} markers ({}...).'.format(len(self.al1),
-                                                        pos_sum))
-
-    def combineSegment(self, seg_o, read_prof, read_list=[]):
-        # find out if we should combine al1-al1/al2-al2 (keep phase)
-        # or al1-al2/al2-al1 (flip phase)
-        flip_phase_supp = 0
-        keep_phase_supp = 0
-        for sr in read_prof:
-            # skip if not a read we want
-            if len(read_list) > 0 and sr not in read_list:
-                continue
-            ob = read_prof[sr]
-            # which allele is better support in this segment?
-            seg_al1 = None
-            a1_supp = 0
-            a2_supp = 0
-            for pos in ob.pos_val:
-                if pos in self.al1 and ob.pos_val[pos] == self.al1[pos]:
-                    a1_supp += 1
-                if pos in self.al2 and ob.pos_val[pos] == self.al2[pos]:
-                    a2_supp += 1
-            if a1_supp == a2_supp:
-                # skip non-informative reads
-                continue
-            elif a1_supp > a2_supp:
-                seg_al1 = True
-            else:
-                seg_al1 = False
-            # which allele is better support in this segment?
-            seg_al2 = None
-            a1_supp = 0
-            a2_supp = 0
-            for pos in ob.pos_val:
-                if pos in seg_o.al1 and ob.pos_val[pos] == seg_o.al1[pos]:
-                    a1_supp += 1
-                if pos in seg_o.al2 and ob.pos_val[pos] == seg_o.al2[pos]:
-                    a2_supp += 1
-            if a1_supp == a2_supp:
-                # skip non-informative reads
-                continue
-            elif a1_supp > a2_supp:
-                seg_al2 = True
-            else:
-                seg_al2 = False
-            # tally the support for keeping/flipping the phases
-            if seg_al1 == seg_al2:
-                keep_phase_supp += 1
-            else:
-                flip_phase_supp += 1
-        # now we know how to combine the alleles
-        for pos in seg_o.al1:
-            if keep_phase_supp > flip_phase_supp:
-                self.al1[pos] = seg_o.al1[pos]
-                self.al2[pos] = seg_o.al2[pos]
-            else:
-                self.al1[pos] = seg_o.al2[pos]
-                self.al2[pos] = seg_o.al1[pos]
-
-
-class ProfileSplitter:
-    """Runs the profile-splitting approach for a set of reads
-
-    Uses the profile from a list of reads to init a set of
-    Segments. The Segments are then combined iteratively, starting
-    with the most supported pairs of segments first.
-
-    Attributes:
-        mark_co_cov : coverage of a pair of markers
-        pos_to_seg : dict position to Segment currently holding that position
-        segs : list of segments
-
-    Methods:
-        constructor : build the coverage matrix and init the segments
-        split : iteratively combine the segments
-        getFinalSegment : return the remaining Segment with the phased profiles
-    """
-
-    def __init__(self, read_prof, read_list=[]):
-        # how many reads cover two positions: mark_co_cov["edge1|edge2"]
-        self.mark_co_cov = {}
-        # start by counting all allele pairs across reads
-        al_p_cov = {}
-        # also count the allele support for each allele at a pos
-        al_cov = {}
-        # check each read
-        for sr in read_prof:
-            # skip if not a read we want
-            if len(read_list) > 0 and sr not in read_list:
-                continue
-            # otherwise get the Observation profile
-            obs = read_prof[sr]
-            # record coverage for every position pairs
-            for p1 in obs.pos_val:
-                # update the allele coverage
-                if p1 not in al_cov:
-                    al_cov[p1] = {}
-                if obs.pos_val[p1] not in al_cov[p1]:
-                    al_cov[p1][obs.pos_val[p1]] = 0
-                al_cov[p1][obs.pos_val[p1]] += 1
-                # check for other positions to update allele pair coverage
-                for p2 in obs.pos_val:
-                    if p1 >= p2:
-                        # record pairs once, as (p, P) with p the
-                        # "smallest" position
-                        continue
-                    # increment the coverage dict
-                    if p1 not in al_p_cov:
-                        al_p_cov[p1] = {}
-                    if p2 not in al_p_cov[p1]:
-                        al_p_cov[p1][p2] = {}
-                    al_pair = '{}+{}'.format(obs.pos_val[p1],
-                                             obs.pos_val[p2])
-                    if al_pair not in al_p_cov[p1][p2]:
-                        al_p_cov[p1][p2][al_pair] = 0
-                    al_p_cov[p1][p2][al_pair] += 1
-        # keep the coverage of the second most supported allele pair
-        for p1 in al_p_cov:
-            for p2 in al_p_cov[p1]:
-                cov = []
-                for al_pair in al_p_cov[p1][p2]:
-                    cov.append(al_p_cov[p1][p2][al_pair])
-                if len(cov) > 1:
-                    cov.sort(reverse=True)
-                    pos_pair = '{}|{}'.format(p1, p2)
-                    self.mark_co_cov[pos_pair] = cov[1]
-        # create segments with top 2 most supported allele for each position
-        self.segs = []
-        self.pos_to_seg = {}
-        # start with one segment per position
-        for pos in al_cov:
-            # skip if only one allele
-            if len(al_cov[pos]) < 2:
-                continue
-            # sort the alleles by coverage
-            al_sorted = sorted(al_cov[pos], key=lambda k: -al_cov[pos][k])
-            # skip is low support for the second allele
-            if al_cov[pos][al_sorted[1]] < 2:
-                continue
-            seg = Segment(pos, al_sorted[0], al_sorted[1])
-            self.pos_to_seg[pos] = len(self.segs)
-            self.segs.append(seg)
-
-    def split(self, read_prof, read_list=[]):
-        # find the next most supported position pair to merge
-        pairs_to_merge = sorted(self.mark_co_cov,
-                                key=lambda k: -self.mark_co_cov[k])
-        for pos_pair in pairs_to_merge:
-            # try to combine those two positions
-            pos_pair_v = pos_pair.split('|')
-            p1 = pos_pair_v[0]
-            p2 = pos_pair_v[1]
-            # skip if they are already in the same segment
-            if (p1 not in self.pos_to_seg or p2 not in self.pos_to_seg or
-                    self.pos_to_seg[p1] == self.pos_to_seg[p2]):
-                continue
-            # otherwise combine segments
-            seg2 = self.segs[self.pos_to_seg[p2]]
-            self.segs[self.pos_to_seg[p1]].combineSegment(seg2, read_prof,
-                                                          read_list=read_list)
-            # update the segments for the combined positions
-            for p_seg2 in seg2.al1:
-                # positions from second segment now point to first segment
-                self.pos_to_seg[p_seg2] = self.pos_to_seg[p1]
-
-    def getFinalSegment(self):
-        # we should now have only one segment
-        seg_idx = None
-        for pos in self.pos_to_seg:
-            if seg_idx is None:
-                seg_idx = self.pos_to_seg[pos]
-            elif seg_idx != self.pos_to_seg[pos]:
-                print("Warning: ProfileSplitter failed to "
-                      "combine all segments")
-        # return segment
-        return self.segs[seg_idx]
-
-
-class GreedyMarkerBiClusterer:
-    """Runs the iterative profile-splitting approach to cluster reads
-
-    Starts with a single profile. Then iteratively split the profile
-    with the highest read coverage. The profile will be split using
-    the helper class ProfileSplitter.
-
-    Attributes:
-        nstates : the number of profiles currently
-        prof : the profiles as a dict of list. Use as prof[position][state]
-
-    Methods:
-        constructor : init the profile
-        splitProfile : assign reads to profiles and split the most covered one
-    """
-
-    def __init__(self, read_prof):
-        # init the one profile/state
-        self.nstates = 1
-        self.prof = {}
-        for sr in read_prof:
-            for pos in read_prof[sr].pos_val:
-                if pos not in self.prof:
-                    # add this position to the single profile
-                    self.prof[pos] = [read_prof[sr].pos_val[pos]]
-                    # note: the init value shouldn't matter here
-
-    def print(self):
-        for pos in self.prof:
-            tp = []
-            for val in self.prof[pos]:
-                tp.append('{}'.format(val))
-            print('S{}:\t'.format(pos) + '  '.join(tp))
-
-    def splitProfile(self, read_prof):
-        # assign reads to each profile
-        prof_to_reads = []
-        prof_mismatch_c = [0] * self.nstates
-        for prof in range(self.nstates):
-            prof_to_reads.append([])
-        for sr in read_prof:
-            read_prof[sr].findBestEMProfile(self)
-            prof = read_prof[sr].profile
-            prof_to_reads[prof].append(sr)
-            prof_mismatch_c[prof] += read_prof[sr].profile_mismatch
-        # find profile with most reads/bases
-        big_prof = None
-        # big_cov = 0
-        big_mm = 0
-        for prof, reads in enumerate(prof_to_reads):
-            if prof_mismatch_c[prof] > big_mm:
-                big_mm = prof_mismatch_c[prof]
-                big_prof = prof
-        # make two profiles for those reads
-        ps = ProfileSplitter(read_prof, prof_to_reads[big_prof])
-        ps.split(read_prof, prof_to_reads[big_prof])
-        # prepare a new profile, init with the profile that was split
-        for pos in self.prof:
-            self.prof[pos].append(self.prof[pos][big_prof])
-        # replace profile and add new one
-        seg = ps.getFinalSegment()
-        for pos in seg.al1:
-            self.prof[pos][big_prof] = seg.al1[pos]
-            self.prof[pos][self.nstates] = seg.al2[pos]
-        self.nstates += 1
-
-    def consensusWithObs(self, obs):
-        # loop over observations, assign, and tally
-        counts = {}
-        for obn in obs:
-            ob = obs[obn]
-            # find the best profile
-            ob.findBestEMProfile(self)
-            if ob.profile_conf == 0:
-                continue
-            # count each type of marker at each position of this profile
-            for pos in ob.pos_val:
-                oname = '{}_{}'.format(pos, ob.profile)
-                if oname not in counts:
-                    counts[oname] = {}
-                if ob.pos_val[pos] not in counts[oname]:
-                    counts[oname][ob.pos_val[pos]] = 0
-                counts[oname][ob.pos_val[pos]] += 1
-        # pick the most supported value for each profile position
-        for pp in self.prof:
-            for state in range(self.nstates):
-                top_val = None
-                top_val_c = 0
-                oname = '{}_{}'.format(pp, state)
-                if oname not in counts:
-                    continue
-                for val in counts[oname]:
-                    if top_val is None or counts[oname][val] > top_val_c:
-                        top_val_c = counts[oname][val]
-                        top_val = val
-                if top_val is not None:
-                    self.prof[pp][state] = top_val
+                # check for this allele at that position
+                al = ob.pos_val[pos]
+                if al not in self.prof[state][pos]:
+                    # don't think this should happen.
+                    print('Warning: allele {} not modeled at position {} '
+                          'in EM'.format(al, pos))
+                al_prob = self.prof[state][pos][al]
+                if al_prob < 0.0001:
+                    al_prob = 0.0001
+                ll_state += math.log(al_prob)
+            logl.append(ll_state)
+        return logl
 
     def updateWithObs(self, obs):
+        # prepare state size to incentivize uniform obs distribution
+        s_size = [0] * self.nstates
+        # start with longest reads first
         obs_names = sorted(list(obs.keys()), key=lambda k: -obs[k].size())
         # loop over observations and integrate them one by one
+        exp_nobs = len(obs_names) / self.nstates
         for obsn in obs_names:
             ob = obs[obsn]
-            # find the best profile
-            ob.findBestEMProfile(self)
-            if ob.profile_conf == 0:
-                continue
-            # overwrite profile
+            # compute the likelihood for each state
+            mll = self.computeReadLL(ob)
+            if DEBUG:
+                print('read ll {}: {}'.format(obsn, mll))
+            # assign to a state
+            best_state = None
+            best_ll = None
+            for state in range(self.nstates):
+                # prior for that states based on reads already assigned
+                sprior = .0001
+                if s_size[state] < exp_nobs:
+                    sprior = 1 - s_size[state] / exp_nobs
+                sprior_ll = math.log(sprior)
+                if best_ll is None or best_ll < mll[state] + sprior_ll:
+                    best_ll = mll[state] + sprior_ll
+                    best_state = state
+            # update the state size
+            s_size[best_state] += 1
+            if DEBUG:
+                print('assigned {} to {} (ll {}).'.format(obsn, best_state, best_ll))
+            # shift profile probabilities
             for pos in ob.pos_val:
-                self.prof[pos][ob.profile] = ob.pos_val[pos]
+                for al in self.marker_values[pos]:
+                    if al == ob.pos_val[pos]:
+                        al_prob = 1 * self.prof[best_state][pos][al]
+                    else:
+                        al_prob = 1 * self.prof[best_state][pos][al]
+                    if al_prob > .9:
+                        al_prob = .9
+                    if al_prob < .1:
+                        al_prob = .1
+                    self.prof[best_state][pos][al] = al_prob
+
+    def consensusWithObs(self, obs, trim_probs=.1):
+        s_size = [0] * self.nstates
+        # loop over observations, assign, and tally
+        # start with longest reads first
+        obs_names = sorted(list(obs.keys()), key=lambda k: -obs[k].size())
+        # loop over observations and integrate them one by one
+        exp_nobs = len(obs_names) / self.nstates
+        counts = {}
+        for obsn in obs_names:
+            ob = obs[obsn]
+            # compute the likelihood for each state
+            mll = self.computeReadLL(ob)
+            # assign to a state
+            best_state = None
+            best_ll = None
+            for state in range(self.nstates):
+                # prior for that states based on reads already assigned
+                sprior = .00000001
+                if s_size[state] < exp_nobs:
+                    sprior = 1 - s_size[state] / exp_nobs
+                sprior_ll = math.log(sprior)
+                if best_ll is None or best_ll < mll[state] + sprior_ll:
+                    best_ll = mll[state] + sprior_ll
+                    best_state = state
+            # update the state size
+            s_size[best_state] += 1
+            # count each type of marker at each position of this profile
+            for pos in ob.pos_val:
+                oname = '{}_{}'.format(pos, best_state)
+                if oname not in counts:
+                    counts[oname] = {}
+                if ob.pos_val[pos] not in counts[oname]:
+                    counts[oname][ob.pos_val[pos]] = 0
+                counts[oname][ob.pos_val[pos]] += 1
+        # recompute probabilities from allele counts
+        for state in range(self.nstates):
+            for pos in self.prof[state]:
+                oname = '{}_{}'.format(pos, state)
+                if oname not in counts:
+                    continue
+                tot_ac = 0
+                for al in counts[oname]:
+                    tot_ac += counts[oname][al]
+                for al in counts[oname]:
+                    al_prob = counts[oname][al] / tot_ac
+                    if al_prob > 1 - trim_probs:
+                        al_prob = 1 - trim_probs
+                    if al_prob < trim_probs:
+                        al_prob = trim_probs
+                    self.prof[state][pos][al] = al_prob
 
 
 class PhaseBlock:
@@ -1940,7 +1562,7 @@ class PhaseBlock:
                     # prof_pair_cost[i1][i2] += 1 - mprob1[i1] * mprob2[i2]
         # find the strongest match between profiles
         # best_m = matchBipartite(prof_pair_cost)
-        best_m = matchBipartiteOpt(prof_pair_cost)
+        best_m = matchBipartite(prof_pair_cost)
         # combine other profile to this phase block
         for pp in range(self.ploidy):
             # other profile to combine
@@ -2286,26 +1908,27 @@ class ModuleDiplotyper:
         if include_buffer:
             self.non_cl.append('buffer')
 
-    def print(self):
+    def print(self, long=False):
         print('ModuleDiplotyper with {} clusters, {} informative '
               'read adjacencies, {} possible '
               'diplotypes.'.format(len(self.clusters),
                                    len(self.sread_adj),
                                    len(self.dips)))
-        adj_sum = {}
-        for adj in self.sread_adj:
-            for adji in range(len(adj) - 1):
-                adj_e = '{} - {}'.format(adj[adji], adj[adji + 1])
-                if adj_e not in adj_sum:
-                    adj_sum[adj_e] = 0
-                adj_sum[adj_e] += 1
-        print(adj_sum)
+        if long:
+            adj_sum = {}
+            for adj in self.sread_adj:
+                for adji in range(len(adj) - 1):
+                    adj_e = '{} - {}'.format(adj[adji], adj[adji + 1])
+                    if adj_e not in adj_sum:
+                        adj_sum[adj_e] = 0
+                    adj_sum[adj_e] += 1
+            print(adj_sum)
 
     def addRead(self, sread_list, sread_info):
         cur_adj = []
         for sreadn in sread_list:
             cl = sread_info[sreadn].cluster
-            if sread_info[sreadn].cluster_conf > 0:
+            if cl is not None and sread_info[sreadn].cluster_conf > 0:
                 cur_adj.append(cl)
             else:
                 if len(cur_adj) > 1:
@@ -2313,7 +1936,8 @@ class ModuleDiplotyper:
                 cur_adj = []
             if cl in self.non_cl or cl in self.clusters:
                 continue
-            self.clusters.add(cl)
+            if cl is not None:
+                self.clusters.add(cl)
         # potentially save the last adjacency
         if len(cur_adj) > 1:
             self.sread_adj.append(cur_adj)
@@ -2386,7 +2010,7 @@ class ModuleDiplotyper:
             hap_used.add(hap_name)
             hap_used.add(hap_comp)
 
-    def scoreDiplotypes(self, dip_name):
+    def scoreDiplotypes(self, dip_name, verbose=False):
         hap1 = self.dips[dip_name]['hap1']
         hap2 = self.dips[dip_name]['hap2']
         # count number of adjacencies that match?
@@ -2394,6 +2018,11 @@ class ModuleDiplotyper:
         for adj in self.sread_adj:
             if anyExactMatch(adj, hap1) or anyExactMatch(adj, hap2):
                 score += 1
+                if verbose:
+                    if anyExactMatch(adj, hap1):
+                        print('dip match: {} -> {}'.format(adj, hap1))
+                    if anyExactMatch(adj, hap2):
+                        print('dip match: {} -> {}'.format(adj, hap2))
         return score
 
     def findBestDiplotype(self):
@@ -2409,9 +2038,218 @@ class ModuleDiplotyper:
         return self.dips[best_dip]
 
 
+class ReadSimilarity:
+    """Similarity between a set of reads
+
+    Holds information about similarity between each pair of
+    (sub)reads. The similarity score can be adjusted to downweight
+    overlap that could connect different modules. It also holds
+    information about how many markers were used to compute the
+    similarity to filter less confident scores.
+
+    Attributes:
+        raw_sim : raw similarity score (proportion of matching markers)
+            dict [subread1][subread2] (for subread1 < subread2)
+        adj_sim : adjusted similarity for M expected modules.
+            dict [subread1][subread2]
+        n_marks : how many markers contributed to the score
+            dict [subread1][subread2] (for subread1 < subread2)
+
+    Methods:
+        compareReads : compute the raw similarity for a set of Subreads
+        adjustSimilarity : adjust the similarity for M modules
+        getSimilarity : returns the minimum adjusted similarity
+    """
+
+    def __init__(self):
+        self.raw_sim = {}
+        self.adj_sim = {}
+        self.n_marks = {}
+        self.n_marks_sl = []
+
+    def compareReads(self, reads):
+        """Compare reads and compute raw similarity
+
+        Compute the similarity for each pairs of reads/subreads as the
+        proportion of markers that match.
+
+        Args:
+        reads : a Subreads object
+
+        """
+        for sr1 in reads.read_prof:
+            # init similarity dict
+            self.raw_sim[sr1] = {}
+            self.n_marks[sr1] = {}
+            for sr2 in reads.read_prof:
+                # compare unique pairs of different subreads only
+                if sr1 >= sr2:
+                    continue
+                # prepae Observation objects
+                ob1 = reads.read_prof[sr1]
+                ob2 = reads.read_prof[sr2]
+                # we will compute the proportion of positions that match
+                n_match = 0
+                n_tot = 0
+                # check common positions
+                for pos in ob1.pos_val:
+                    if pos not in ob2.pos_val:
+                        continue
+                    if ob1.pos_val[pos] == ob2.pos_val[pos]:
+                        n_match += 1
+                    n_tot += 1
+                # similarity is just proportion of matching positions
+                if n_tot > 0:
+                    self.raw_sim[sr1][sr2] = n_match / n_tot
+                else:
+                    self.raw_sim[sr1][sr2] = None
+                # update the number of markers used
+                self.n_marks[sr1][sr2] = n_tot
+                if n_tot > 0:
+                    # don't include reads that don't overlap in the
+                    # sorted list because we don't want to include
+                    # them in the quantil computation
+                    self.n_marks_sl.append(n_tot)
+        # sort the list used later for the quantile of the marker support
+        self.n_marks_sl.sort()
+
+    def adjustSimilarity(self, n_clusters, min_markers=.5):
+        """Adjust the similarity scores for N clusters
+
+        For each read, downweight scores after the top N most similar
+        other reads. Use the rank of the similarity scores, and the
+        last rank for ties.
+
+        Args:
+        n_clusters : the number of clusters that we want to favor
+
+        """
+        self.adj_sim = {}
+        min_n_marks = 0
+        if min_markers > 0:
+            min_n_marks = self.getMarkerQuantile(min_markers)
+        for sr1 in self.raw_sim:
+            # init adjusted similarity
+            self.adj_sim[sr1] = {}
+            # prepare a list of similarity
+            sr_sim = []
+            sr_names = {}
+            for sr2 in self.raw_sim:
+                if sr1 == sr2 or self.getMarkerSupport(sr1, sr2) < min_n_marks:
+                    continue
+                sim_score = self.getRawSimilarity(sr1, sr2)
+                if sim_score is not None:
+                    sr_names[sr2] = len(sr_sim)
+                    sr_sim.append(sim_score)
+            # compute the rank (ties=last rank)
+            sr_rank = rankLast(sr_sim)
+            # adjust with the rank
+            adj_th = len(sr_names) / n_clusters
+            for sr2 in self.raw_sim:
+                if sr1 == sr2:
+                    continue
+                elif self.getMarkerSupport(sr1, sr2) == 0:
+                    # when reads don't overlap, use None
+                    self.adj_sim[sr1][sr2] = None
+                elif self.getMarkerSupport(sr1, sr2) < min_n_marks:
+                    # not enough support, set to 0
+                    self.adj_sim[sr1][sr2] = 0
+                else:
+                    # set to 0 if rank above N
+                    f_adj = 0
+                    sr_rk = sr_rank[sr_names[sr2]]
+                    if sr_rk < adj_th:
+                        # otherwise linearly downweight
+                        f_adj = 1 - sr_rk / adj_th
+                    # adjust the similarity score
+                    self.adj_sim[sr1][sr2] = sr_sim[sr_names[sr2]] * f_adj
+
+    def getRawSimilarity(self, sr1, sr2):
+        sim_score = None
+        if sr1 < sr2:
+            sim_score = self.raw_sim[sr1][sr2]
+        elif sr2 < sr1:
+            sim_score = self.raw_sim[sr2][sr1]
+        return sim_score
+
+    def getMarkerSupport(self, sr1, sr2):
+        nmarks = None
+        if sr1 < sr2:
+            nmarks = self.n_marks[sr1][sr2]
+        elif sr2 < sr1:
+            nmarks = self.n_marks[sr2][sr1]
+        return nmarks
+
+    def getSimilarity(self, sr1, sr2):
+        """Returns the minimum adjusted similarity"""
+        if self.adj_sim[sr1][sr2] is None:
+            return None
+        return min(self.adj_sim[sr1][sr2], self.adj_sim[sr2][sr1])
+
+    def getMarkerQuantile(self, quant):
+        """Returns the quantile of the marker support (used internally)"""
+        return self.n_marks_sl[int(len(self.n_marks_sl) * quant)]
+
+    def writeSimilarity(self, out_fn):
+        """Write the adjusted similarity matrix to a file"""
+        sr_names = list(self.raw_sim.keys())
+        out_str = ['sread1\tsread2\tsim']
+        for sr1 in sr_names:
+            for sr2 in sr_names:
+                if sr1 != sr2 and self.adj_sim[sr1][sr2] is not None:
+                    out_str.append('{}\t{}\t{}'.format(sr1, sr2,
+                                                       self.adj_sim[sr1][sr2]))
+        outf = open(out_fn, 'wt')
+        outf.write('\n'.join(out_str) + '\n')
+        outf.close()
+
+    def clusterSubreads(self, subreads, min_similarity=.01):
+        # create a network
+        G = networkx.Graph()
+        for sr1 in self.raw_sim:
+            for sr2 in self.raw_sim:
+                if sr1 == sr2:
+                    continue
+                sim = self.adj_sim[sr1][sr2]
+                if sim is not None and sim > min_similarity:
+                    G.add_edge(sr1, sr2, weight=sim)
+        # find communities
+        comms = networkx.community.louvain_communities(G, resolution=1,
+                                                       seed=123)
+        subreads.clearClusters()
+        for comm in range(len(comms)):
+            for sr in comms[comm]:
+                subreads.sreads[sr].assignCluster(comm, 1)
+        # assign other subreads to the cluster too?
+        for sr in self.raw_sim:
+            if subreads.sreads[sr].cluster is not None:
+                continue
+            best_sr = None
+            best_sim = None
+            for sr2 in self.raw_sim:
+                if sr2 == sr or subreads.sreads[sr2].cluster is None:
+                    continue
+                sim = self.getRawSimilarity(sr, sr2)
+                if sim is None:
+                    continue
+                if best_sr is None or sim > best_sim:
+                    best_sim = sim
+                    best_sr = sr2
+            comm = 0
+            conf = 0
+            if best_sr is None:
+                # assign to random community
+                comm = random.randint(0, len(comms) - 1)
+            else:
+                comm = subreads.sreads[best_sr].cluster
+                conf = 1
+            subreads.sreads[sr].assignCluster(comm, conf)
+        return len(comms)
+
+
 def anyExactMatch(query, target):
     # helper function to check for any exact match
-    for t_pos in range(len(target) - len(query)):
+    for t_pos in range(len(target) - len(query) + 1):
         if query[0] == target[t_pos]:
             # check the other positions
             all_match = True
@@ -2425,34 +2263,6 @@ def anyExactMatch(query, target):
 
 
 def matchBipartite(pair_cost):
-    n = len(pair_cost)
-    # sort pairs by increasing cost
-    cost_d = {}
-    for i1 in range(n):
-        for i2 in range(n):
-            cost_d[(i1, i2)] = pair_cost[i1][i2]
-    pairs_sorted = sorted(cost_d, key=lambda k: cost_d[k])
-    matching = {}
-    matching[0] = []
-    matching[1] = []
-    matching['cost'] = 0
-    for i1, i2 in pairs_sorted:
-        if i1 in matching[0] or i2 in matching[1]:
-            continue
-        matching[0].append(i1)
-        matching[1].append(i2)
-        matching['cost'] += pair_cost[i1][i2]
-        if len(matching[1]) == n:
-            # we've assigned all pairs
-            break
-    # convert to dict with matching
-    res = {}
-    for ii in range(n):
-        res[matching[0][ii]] = matching[1][ii]
-    return res
-
-
-def matchBipartiteOpt(pair_cost):
     n = len(pair_cost)
     cur_cands = []
     matching = {}
@@ -2565,3 +2375,71 @@ def mapReadsToHap(path, reads, max_node_gap=10):
         read_alns[readn]['aln_pos'] = hpos
         read_alns[readn]['aln_type'] = aln_type
     return read_alns
+
+
+def rankLast(x):
+    val_n = {}
+    vals = []
+    for val in x:
+        if val not in val_n:
+            val_n[val] = 0
+            vals.append(val)
+        val_n[val] += 1
+    val_rank = {}
+    vals.sort(reverse=True)
+    cur_rank = 0
+    for val in vals:
+        val_rank[val] = cur_rank + val_n[val]
+        cur_rank += val_n[val]
+    rks = []
+    for val in x:
+        rks.append(val_rank[val])
+    return rks
+
+
+def seq(start, end, step):
+    res = [start]
+    while res[-1] + step <= end:
+        res.append(res[-1] + step)
+    return res
+
+
+def initConfPath(config):
+    if 'diplotype_args' not in config:
+        config['diplotype_args'] = {}
+    if 'fast' not in config['diplotype_args']:
+        conf = {}
+        conf['method'] = 'kcomms'
+        conf['min_read_support_l'] = 3
+        conf['min_read_support_u'] = 3
+        conf['min_read_len_l'] = 0
+        conf['min_read_len_u'] = 10000
+        conf['min_read_len_s'] = 5000
+        conf['module_copies_l'] = 2
+        conf['module_copies_u'] = 6
+        conf['min_mark_supp_l'] = .2
+        conf['min_mark_supp_u'] = .9
+        conf['min_mark_supp_s'] = .7
+        config['diplotype_args']['fast'] = conf
+    if 'default' not in config['diplotype_args']:
+        conf = {}
+        conf['method'] = 'both'
+        conf['min_read_support_l'] = 2
+        conf['min_read_support_u'] = 4
+        conf['min_read_len_l'] = 0
+        conf['min_read_len_u'] = 10000
+        conf['min_read_len_s'] = 2000
+        conf['module_copies_l'] = 2
+        conf['module_copies_u'] = 6
+        conf['min_mark_supp_l'] = .1
+        conf['min_mark_supp_u'] = .9
+        conf['min_mark_supp_s'] = .4
+        config['diplotype_args']['default'] = conf
+    if 'em' not in config['diplotype_args']:
+        conf = config['diplotype_args']['default'].copy()
+        conf['method'] = 'em'
+        config['diplotype_args']['em'] = conf
+    if 'kcomms' not in config['diplotype_args']:
+        conf = config['diplotype_args']['default'].copy()
+        conf['method'] = 'kcomms'
+        config['diplotype_args']['kcomms'] = conf

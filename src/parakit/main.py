@@ -255,7 +255,7 @@ def scmd_diplotype(args):
                          min_read_len=args.l)
 
     # find paths
-    paths_res = pkpath.findPaths(nodes, reads, args)
+    paths_res = pkpath.findPaths(nodes, reads, config, args)
     pkio.writePathsInfo(paths_res, nodes,
                         stats_fn=args.o + '.paths-stats.tsv',
                         info_fn=args.o + '.paths-info.tsv')

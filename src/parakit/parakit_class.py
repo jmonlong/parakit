@@ -127,11 +127,13 @@ class Reads:
         self.edge_to_readpos = {}
         self.nsuc = {}
         self.path = {}
+        self.read_len = {}
         self.startpos = {}
         self.endpos = {}
         self.readpos = {}
 
-    def addRead(self, read_name, path, startpos=[], endpos=[], readpos=[]):
+    def addRead(self, read_name, path, startpos=[], endpos=[], readpos=[],
+                read_len=None):
         """Add a new read alignment
 
         If provided startpos/endpos/readpos should have the same
@@ -156,6 +158,8 @@ class Reads:
             self.endpos[read_name] = endpos
         if len(readpos) > 0:
             self.readpos[read_name] = readpos
+        if read_len is not None:
+            self.read_len[read_name] = read_len
         # save edges support
         for pos in range(len(path)-1):
             ename = path[pos] + '_' + path[pos+1]

@@ -220,6 +220,7 @@ def readGAF(filen, nodes, verbose=False, min_read_len=0):
         n_idx = 0
         node_pos = int(line[7])
         read_pos = int(line[2])
+        read_len = int(line[3]) - int(line[2])
         path_cov = []
         path_node_startpos = []
         path_node_endpos = []
@@ -273,7 +274,8 @@ def readGAF(filen, nodes, verbose=False, min_read_len=0):
         reads_tr.addRead(readn, path_cov_node,
                          startpos=path_node_startpos,
                          endpos=path_node_endpos,
-                         readpos=path_read_pos)
+                         readpos=path_read_pos,
+                         read_len=read_len)
     inf_gaf.close()
     if verbose:
         print('\t{} reads parsed.'.format(reads_tr.nReads()))
