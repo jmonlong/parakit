@@ -222,16 +222,7 @@ pars_diplotype.add_argument('-g', help='input GFA pangenome', default='')
 pars_diplotype.add_argument('-r', help='input alignments in GAF',
                             required=True)
 pars_diplotype.add_argument('-o', help='output TSV prefix', required=True)
-pars_diplotype.add_argument('-c', default=3, type=float,
-                            help='minimum read support for '
-                            'subread clustering.')
-pars_diplotype.add_argument('-m', help='maximum number of subread clusters '
-                            'and haplotype to consider (comma-separated). '
-                            'Default: "50,50"',
-                            default='50,50')
-pars_diplotype.add_argument('-l', help='minimum read length. '
-                            'Default: "0"',
-                            default=0, type=int)
+pars_diplotype.add_argument('-m', help='method to use (original, default, fast, em, kcomms). Default: default')
 pars_diplotype.add_argument('-t', help='debug trace mode', action='store_true')
 pars_diplotype.set_defaults(scmd='diplotype')
 
@@ -251,8 +242,7 @@ def scmd_diplotype(args):
     pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=args.t)
 
     # read GAF
-    reads = pkio.readGAF(args.r, nodes, verbose=args.t,
-                         min_read_len=args.l)
+    reads = pkio.readGAF(args.r, nodes, verbose=args.t)
 
     # find paths
     paths_res = pkpath.findPaths(nodes, reads, config, args)

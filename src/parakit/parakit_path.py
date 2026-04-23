@@ -51,9 +51,10 @@ def findPaths(nodes, reads, config, args):
         # they are combined into at most max_haps haplotypes
         max_cls = 50
         max_haps = 50
+        min_read_support = 3
         # first cluster subreads
         cl_o = pkpo.biClusterSubreads(nodes, reads,
-                                      min_read_support=args.c,
+                                      min_read_support=min_read_support,
                                       max_cls=max_cls,
                                       max_cycles=4,
                                       max_haps=max_haps,
@@ -190,12 +191,14 @@ def clusterSubreads(nodes, reads, config, verbose=False):
     paths = {}
     hap_pair_names = []
     for min_read_len in read_len_l:
-        print('\t\tMin read length: {}...'.format(min_read_len))
+        if verbose:
+            print('\t\tMin read length: {}...'.format(min_read_len))
         # init subreads
         sreads = Subreads()
         sreads.splitReads(reads, nodes, min_read_len=min_read_len)
         for min_read_support in read_supp_l:
-            print('\t\t\tMin read support: {}...'.format(min_read_support))
+            if verbose:
+                print('\t\t\tMin read support: {}...'.format(min_read_support))
             sreads.profileSubreads(marker_finder,
                                    min_read_support=min_read_support)
             for nmodules in module_l:
@@ -1074,7 +1077,8 @@ class Subreads:
                         exit
                 path.append(nnode)
             cons_path[cl] = path
-        if len(warn_low_cov_nodes) > 0:
+        # TODO reactivate this warning once a better logging system is in place
+        if len(warn_low_cov_nodes) > 0 and False:
             print("Warning: no coverage during consensus "
                   "(for {} nodes).".format(len(warn_low_cov_nodes)))
         return cons_path
@@ -1103,7 +1107,7 @@ class Subreads:
         for readn in self.read_to_sub:
             md.addRead(self.read_to_sub[readn], self.sreads)
         md.prepareDiplotypes()
-        md.print(long=True)
+        # md.print(long=True)
         best_dip = md.findBestDiplotype()
         # prepare full haplotype paths
         res = {}
