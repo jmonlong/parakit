@@ -80,73 +80,145 @@ def findPaths(nodes, reads, config, args):
     # precompute read coverage on each node
     if args.t:
         print('\tPrecomputing node coverage for reads and haplotypes...')
-    read_cov = {}
-    for nod in nodes:
-        readc = 0
-        if 'reads' in nodes[nod]:
-            readc = len(nodes[nod]['reads'])
-            read_cov[nod] = readc
-            # precompute path coverage on each node
-    path_cov = {}
-    for pathn in cl_o['paths']:
-        path_cov[pathn] = {}
-        for nod in cl_o['paths'][pathn]:
-            if nod not in path_cov[pathn]:
-                path_cov[pathn][nod] = 1
-            else:
-                path_cov[pathn][nod] += 1
-                # evaluate each pair
+    cov_eval = CoverageEvaluator(nodes, cl_o['paths'])
+    # evaluate each pair
     if args.t:
         print('\tEvaluating each haplotype pair...')
-    escores = []
-    # keep track of some min/max values to adjust scores later
-    max_cor = 0
-    max_cov_dev = 0
-    min_cov_dev = math.inf
-    max_aln = 0
-    min_hap_ll = 0
-    max_hap_ll = -math.inf
+    escores = EvaluationScores()
     # evaluate each haplotype pair
     for hpair_names in cl_o['hap_pairs']:
-        mode1 = hpair_names[0]
-        mode2 = hpair_names[1]
-        esc = evaluatePaths(read_cov, path_cov[mode1], path_cov[mode2],
-                            nodes, longest_reads,
-                            aln_score[mode1], aln_score[mode2])
-        esc['hap1'] = mode1
-        esc['hap2'] = mode2
-        escores.append(esc)
-        # update the extreme values used to scale score later
-        max_cor = max(max_cor, esc['cov_cor'])
-        max_cov_dev = max(max_cov_dev, esc['cov_dev'])
-        min_cov_dev = min(min_cov_dev, esc['cov_dev'])
-        max_aln = max(max_aln, esc['aln_score'])
-        max_hap_ll = max(max_hap_ll, esc['hap_ll'])
-        min_hap_ll = min(min_hap_ll, esc['hap_ll'])
-        # adjust scores to the [0,1] range
-    cov_dev_a = (max_cov_dev - min_cov_dev)
-    hap_ll_a = (min_hap_ll - max_hap_ll)
-    for esc in escores:
-        esc['cov_cor_adj'] = esc['cov_cor'] / max_cor
-        if cov_dev_a == 0:
-            esc['cov_dev_adj'] = 1
-        else:
-            esc['cov_dev_adj'] = (max_cov_dev - esc['cov_dev']) / cov_dev_a
-            # esc['cov_dev_adj'] = 1 - esc['cov_dev'] / max_cov_dev
-        if hap_ll_a == 0:
-            esc['hap_ll_adj'] = 1
-            esc['aln_score_adj'] = 1
-        else:
-            esc['hap_ll_adj'] = (min_hap_ll - esc['hap_ll']) / hap_ll_a
-            esc['aln_score_adj'] = esc['aln_score'] / max_aln
-            # rank hap pairs
-    escores_r = sorted(escores,
-                       key=lambda k: (k['cov_dev_adj']
-                                      + k['hap_ll_adj']
-                                      + k['cov_cor_adj']
-                                      + 3 * k['aln_score_adj']),
-                       reverse=True)
+        escores.evaluate(hpair_names[0], hpair_names[1], cov_eval, aln_score,
+                         nodes, longest_reads)
+    # rank hap pairs
+    escores_r = escores.rank()
     return ({'escores': escores_r, 'paths': cl_o['paths']})
+
+
+class EvaluationScores:
+    def __init__(self):
+        self.scores = {}
+
+    def evaluate(self, path1, path2, cov_eval, aln_score,
+                 nodes, longest_reads):
+        esc = evaluatePaths(path1, path2, cov_eval, aln_score,
+                            nodes, longest_reads)
+        esc['hap1'] = path1
+        esc['hap2'] = path2
+        self.scores['{}_{}'.format(path1, path2)] = esc
+
+    def rank(self):
+        # rank each relevant metric
+        cov_metrics = ['cov_cor', 'cov_dev', 'hap_ll', 'cov_cosine']
+        # cov_metrics = ['cov_cor', 'cov_dev', 'cov_cosine', 'aln_score']
+        aln_metrics = ['aln_score']
+        # dict will store the rank for each metric and diplotype
+        rk_m = {}
+        for metric in cov_metrics + aln_metrics:
+            # find unique values of the metric
+            uniq_m = set()
+            for dipn in self.scores:
+                uniq_m.add(self.scores[dipn][metric])
+            # sort them in decreasing order
+            uniq_sorted_m = list(uniq_m)
+            uniq_sorted_m.sort(reverse=True)
+            # prepare a map value -> position in that list
+            rk_dict = {}
+            for idx, value in enumerate(uniq_sorted_m):
+                rk_dict[value] = idx
+            # save the rank for each diplotype
+            rk_m[metric] = {}
+            for dipn in self.scores:
+                rk_m[metric][dipn] = rk_dict[self.scores[dipn][metric]]
+        # compute an overall rank for each diplotype
+        for dipn in self.scores:
+            rk = 0
+            for metric in cov_metrics:
+                rk += float(rk_m[metric][dipn]) / len(cov_metrics)
+            for metric in aln_metrics:
+                rk += float(rk_m[metric][dipn]) / len(aln_metrics)
+            self.scores[dipn]['rank'] = rk
+        dip_sorted = sorted(self.scores, key=lambda k: self.scores[k]['rank'])
+        escores_r = []
+        for dipn in dip_sorted:
+            escores_r.append(self.scores[dipn])
+        return escores_r
+
+
+class CoverageEvaluator:
+    def __init__(self, nodes, paths):
+        # precompute read coverage on each node
+        self.read_cov = {}
+        self.read_cov_d = 0
+        for nod in nodes:
+            # only save nodes covered by one read (to not penalize flanks)
+            if 'reads' in nodes[nod]:
+                readc = len(nodes[nod]['reads'])
+                self.read_cov[nod] = readc
+                self.read_cov_d += readc * readc
+        self.read_cov_d = math.sqrt(self.read_cov_d)
+        # precompute path coverage on each node
+        self.path_cov = {}
+        for pathn in paths:
+            self.path_cov[pathn] = {}
+            for nod in paths[pathn]:
+                if nod not in self.path_cov[pathn]:
+                    self.path_cov[pathn][nod] = 1
+                else:
+                    self.path_cov[pathn][nod] += 1
+        # remember which nodes are small enough for some metrics
+        self.small_nodes = set()
+        for node in nodes:
+            if nodes[node]['size'] < 5 and node in self.read_cov:
+                self.small_nodes.add(node)
+
+    def computeCorrelation(self, path1, path2):
+        # prepare vectors of read and node coverage across selected nodes
+        path_cov_1 = self.path_cov[path1]
+        path_cov_2 = self.path_cov[path2]
+        read_c = []
+        path_c = []
+        for nod in self.small_nodes:
+            read_c.append(self.read_cov[nod])
+            pcov = 0
+            if nod in path_cov_1:
+                pcov += path_cov_1[nod]
+            if nod in path_cov_2:
+                pcov += path_cov_2[nod]
+            path_c.append(pcov)
+        # correlation between coverage on the predicted path and the reads
+        if stat.variance(read_c) > 0 and stat.variance(path_c) > 0:
+            cov_cor = stat.correlation(read_c, path_c)
+        elif stat.variance(read_c) == 0 and stat.variance(path_c) == 0:
+            cov_cor = 1
+        else:
+            cov_cor = .5
+        # deviation from copy-number normalized counts
+        one_copy_cov = []
+        for ii in range(len(read_c)):
+            if path_c[ii] > 0:
+                one_copy_cov.append(float(read_c[ii]) / path_c[ii])
+        one_copy_cov = stat.median(one_copy_cov)
+        cov_dev = []
+        for ii in range(len(read_c)):
+            cov_dev.append(abs(read_c[ii] - path_c[ii] * one_copy_cov))
+        cov_dev = -1 * stat.mean(cov_dev)
+        return ({'cov_cor': cov_cor, 'cov_dev': cov_dev})
+
+    def computeCosine(self, path1, path2):
+        path_cov_1 = self.path_cov[path1]
+        path_cov_2 = self.path_cov[path2]
+        path_cov_d = 0
+        dot_prod = 0
+        for node in self.read_cov:
+            pcov = 0
+            if node in path_cov_1:
+                pcov += path_cov_1[node]
+            if node in path_cov_2:
+                pcov += path_cov_2[node]
+            dot_prod += self.read_cov[node] * pcov
+            path_cov_d += pcov * pcov
+        path_cov_d = math.sqrt(path_cov_d)
+        return (dot_prod / (self.read_cov_d * path_cov_d))
 
 
 def clusterSubreads(nodes, reads, config, verbose=False):
@@ -428,8 +500,7 @@ def clusterSubreadsNetwork(nodes, reads,
     return (res)
 
 
-def computeHapPairLikelihood(nodes, path_cov_1, path_cov_2,
-                             read_scores_1, read_scores_2,
+def computeHapPairLikelihood(path1, path2, cov_eval, aln_scores, nodes,
                              prob_error=.01):
     """Compute the likelihood of read assignments to a diplotype
 
@@ -439,16 +510,18 @@ def computeHapPairLikelihood(nodes, path_cov_1, path_cov_2,
     the haplotype.
 
     Args:
-        nodes : dict with node info
-        path_cov_1 : node coverage of first haplotype
-        path_cov_2 : node coverage of second haplotype
-        read_scores_1 : alignment score of reads on first haplotype
-        read_scores_2 : alignment score of reads on second haplotype
+        path1/2 : names of the two paths
+        cov_eval : CoverageEvaluator object with precomputed coverage
+        aln_score : precomputed alignment scores
+        nodes : dict with node information
         prob_error : probability of a node in the read but not in the haplotype
 
     Returns: the log-likelihood of the read assignment to the diplotype
-
     """
+    read_scores_1 = aln_scores[path1]
+    read_scores_2 = aln_scores[path2]
+    path_cov_1 = cov_eval.path_cov[path1]
+    path_cov_2 = cov_eval.path_cov[path1]
     # for each node, compute a likelihood of observing this path assignment
     tot_ll = 0
     for noden in nodes:
@@ -489,66 +562,30 @@ def computeHapPairLikelihood(nodes, path_cov_1, path_cov_2,
     return (tot_ll)
 
 
-def evaluatePaths(read_cov, path_cov_1, path_cov_2, nodes, longest_reads,
-                  read_aln, read_aln2=[]):
+def evaluatePaths(path1, path2, cov_eval, aln_scores, nodes, longest_reads):
     """Compute evaluation metrics for this diplotype
 
     Compure coverage, alignment, and assignment likelihood for this diplotype.
 
     Args:
-        read_cov : node coverage across all reads
-        path_cov_1 : node coverage in the first haplotype
-        path_cov_2 : node coverage in the second haplotype
+        path1/2 : names of the two paths
+        cov_eval : CoverageEvaluator object with precomputed coverage
+        aln_scores : precomputed alignment scores
         nodes : dict with node information
         longest_reads : list of longes reads (or sorted by decreasing length)
-        read_aln : alignment score of all reads on first haplotype
-        read_aln2 : alignment score of all reads on second haplotype
 
     Returns: a dict with multiple evaluation metrics
     """
-    # prepare vectors of read and node coverage across selected nodes
-    read_c = []
-    path_c = []
-    for nod in nodes:
-        if nodes[nod]['size'] >= 5:
-            # keep only small nodes, to keep it simple and focus on important
-            # nodes (those that are more likely copy-number variable)
-            continue
-        if nod not in read_cov:
-            continue
-        read_c.append(read_cov[nod])
-        pcov = 0
-        if nod in path_cov_1:
-            pcov += path_cov_1[nod]
-        if nod in path_cov_2:
-            pcov += path_cov_2[nod]
-        path_c.append(pcov)
-    # correlation between coverage on the predicted path and the reads
-    if stat.variance(read_c) > 0 and stat.variance(path_c) > 0:
-        cov_cor = stat.correlation(read_c, path_c)
-    elif stat.variance(read_c) == 0 and stat.variance(path_c) == 0:
-        cov_cor = 1
-    else:
-        cov_cor = .5
-    # deviation from copy-number normalized counts
-    one_copy_cov = []
-    for ii in range(len(read_c)):
-        if path_c[ii] > 0:
-            one_copy_cov.append(float(read_c[ii]) / path_c[ii])
-    one_copy_cov = stat.median(one_copy_cov)
-    cov_dev = []
-    for ii in range(len(read_c)):
-        cov_dev.append(abs(read_c[ii] - path_c[ii] * one_copy_cov))
-    cov_dev = stat.mean(cov_dev)
+    # coverage metrics
+    cov_cor_dev = cov_eval.computeCorrelation(path1, path2)
+    cov_cosine = cov_eval.computeCosine(path1, path2)
     # read alignment on the path
     # compute alignment score
     aln_score = 0
     max_aln_score = 0
     w_sum = 0
-    for readn in read_aln:
-        r_score = read_aln[readn]
-        if len(read_aln2) > 0:
-            r_score = max(read_aln2[readn], r_score)
+    for readn in aln_scores[path1]:
+        r_score = max(aln_scores[path1][readn], aln_scores[path2][readn])
         aln_score += r_score
         max_aln_score = max(max_aln_score, r_score)
         w_sum += 1
@@ -556,20 +593,21 @@ def evaluatePaths(read_cov, path_cov_1, path_cov_2, nodes, longest_reads,
     # count how many of the top longest reads align well
     aln_score_th = aln_score + .8 * (max_aln_score - aln_score)
     rii = 0
-    rii_tot = min(len(longest_reads), len(read_aln)/10)
+    rii_tot = min(len(longest_reads), len(aln_scores[path1])/10)
     nsupp_reads = 0
     while rii < rii_tot:
-        r_score = read_aln[longest_reads[rii]]
-        if len(read_aln2) > 0:
-            r_score = max(read_aln2[longest_reads[rii]], r_score)
+        readn = longest_reads[rii]
+        r_score = max(aln_scores[path1][readn], aln_scores[path2][readn])
         if r_score > aln_score_th:
             nsupp_reads += 1
         rii += 1
     # compute likelihood of read assignment to haplotypes
-    hap_ll = computeHapPairLikelihood(nodes, path_cov_1, path_cov_2,
-                                      read_aln, read_aln2)
+    hap_ll = computeHapPairLikelihood(path1, path2, cov_eval,
+                                      aln_scores, nodes)
     # return scores
-    return ({'cov_cor': cov_cor, 'cov_dev': cov_dev,
+    return ({'cov_cor': cov_cor_dev['cov_cor'],
+             'cov_dev': cov_cor_dev['cov_dev'],
+             'cov_cosine': cov_cosine,
              'aln_score': aln_score, 'hap_ll': hap_ll,
              'aln_long_prop': float(nsupp_reads)/rii_tot})
 

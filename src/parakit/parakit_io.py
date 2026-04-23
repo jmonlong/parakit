@@ -777,9 +777,8 @@ def writePathsInfo(paths_res, nodes, stats_fn, info_fn):
     paths = paths_res['paths']
     # write ranked list
     outf_rk = open(stats_fn, 'wt')
-    heads_rk = ['hap1', 'hap2', 'cov_cor', 'cov_dev', 'hap_ll', 'aln_score',
-                'cov_cor_adj', 'cov_dev_adj', 'hap_ll_adj',
-                'aln_score_adj', 'aln_long_prop']
+    heads_rk = ['hap1', 'hap2', 'cov_cor', 'cov_dev', 'cov_cosine', 'hap_ll',
+                'aln_score', 'rank', 'aln_long_prop']
     ofmt_rk = '\t'.join(['{}'] * len(heads_rk)) + '\n'
     outf_rk.write('\t'.join(heads_rk) + '\n')
     for esc in escores_r:
@@ -787,12 +786,10 @@ def writePathsInfo(paths_res, nodes, stats_fn, info_fn):
                                      esc['hap2'],
                                      esc['cov_cor'],
                                      esc['cov_dev'],
+                                     esc['cov_cosine'],
                                      esc['hap_ll'],
                                      esc['aln_score'],
-                                     esc['cov_cor_adj'],
-                                     esc['cov_dev_adj'],
-                                     esc['hap_ll_adj'],
-                                     esc['aln_score_adj'],
+                                     esc['rank'],
                                      esc['aln_long_prop']))
 
     # write paths
