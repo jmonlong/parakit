@@ -4,6 +4,7 @@ import parakit.parakit_io as pkio
 import parakit.parakit_process as pkproc
 import parakit.parakit_variants as pkvar
 import parakit.parakit_path as pkpath
+import parakit.parakit_plot as pkplot
 import json
 import os
 
@@ -374,6 +375,56 @@ def scmd_viz(args):
     return (True)
 
 
+# viz subcommand: make different graphs of the results
+pars_plot = spars.add_parser('plot', help='plot the results')
+pars_plot.add_argument('-j', help='config JSON file', required=True)
+pars_plot.add_argument('-n', help='node information', default='')
+pars_plot.add_argument('-g', help='input GFA pangenome', default='')
+pars_plot.add_argument('-e', help='input genome element annotation TSV',
+                       default='')
+pars_plot.add_argument('-r', default='', help='input alignments in GAF')
+pars_plot.add_argument('-d', help='diplotype paths, sorted', default='')
+pars_plot.add_argument('-p', help='haplotype paths information', default='')
+pars_plot.add_argument('-m', help='plot mode', default='subreads')
+pars_plot.add_argument('-o', help='output PDF file', default='parakit.viz.pdf')
+pars_plot.set_defaults(scmd='plot')
+
+
+def scmd_plot(args):
+    # read config json file
+    config = json.load(open(args.j, 'rt'))
+    # get offset from config file
+    c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
+    pos_offset += 1
+    # load node info
+    node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
+    nodes = pkio.readNodeInfo(node_fn)
+    # update with edge information
+    pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
+    pkio.updateNodesSucsWithGFA(nodes, pg_gfa)
+    gene_fn = pkio.geneFile(args.e, config, check_file=True)
+    genes = pkio.readGeneAnnotation(gene_fn, nodes,
+                                    pos_offset, config['genes'])
+    # read GAF
+    reads = None
+    if args.r != '':
+        reads = pkio.readGAF(args.r, nodes, verbose=True)
+    # read diplotype
+    dip_paths = None
+    if args.d != '' and args.p != '':
+        dip_paths = pkio.readDiplotype(args.d, args.p, verbose=True)
+    # if only nodes and reads -> packed subread plot
+    if reads is not None and dip_paths is None:
+        if args.m == 'subreads':
+            pkplot.plotPackedSubreads(nodes, reads, genes, args.o)
+        elif args.m == 'longreads':
+            pkplot.plotLongReads(nodes, reads, genes, args.o)
+    # if nodes, reads and a diplotype -> reads on haplotypes plot
+    if reads is not None and dip_paths is not None:
+        pkplot.plotDiplotypeReads(nodes, reads, dip_paths, args.o)
+    return (True)
+
+
 # copy subcommand: estimate the copy number of the modules
 pars_copy = spars.add_parser('copy',
                              help='estimate the copy number of the modules')
@@ -472,6 +523,8 @@ def main():
         scmd_diplotype(args)
     elif args.scmd == 'viz':
         scmd_viz(args)
+    elif args.scmd == 'plot':
+        scmd_plot(args)
     elif args.scmd == 'copy':
         scmd_copy(args)
     elif args.scmd == 'gafstats':

@@ -167,7 +167,7 @@ ggplot(pca.df, aes(x=pc1, y=pc2, color=module)) +
 te.jump = paths.s %>%
   mutate(next.node=c(node[-1], NA),
          jump=abs(node-next.node)) %>% 
-  filter(jump>100, jump<300) %>%
+  filter(jump>100, jump<500) %>%
   group_by(node, next.node) %>% summarize(n=n()) %>%
   arrange(desc(n)) %>% 
   head
