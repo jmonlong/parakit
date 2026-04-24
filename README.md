@@ -103,6 +103,11 @@ parakit call -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o calls.tsv
 ```
 
 The reads/calls are saved in `calls.tsv`.
+They can be filtered with:
+
+```bash
+parakit filtercalls -j rccx.grch38_hprc.mc.config.json -c calls.tsv -af -o calls.filtered.tsv
+```
 
 To list and evaluate candidate diplotype:
 
@@ -226,7 +231,6 @@ parakit gafstats -r reads.gaf.gz -j rccx.grch38_hprc.mc.config.json
 
 What we plan on the near future.
 
-- [ ] Implement more robust diplotyping and add some information about our confidence in them
-- [ ] Take long sequences, e.g. assembled contigs, as input.
+- [~] Implement more robust diplotyping and add some information about our confidence in them
 - [ ] Test on Pacbio reads.
 - [ ] Automate pangenome construction on other regions. 

@@ -90,7 +90,8 @@ def findPaths(nodes, reads, config, args):
         escores.evaluate(hpair_names[0], hpair_names[1], cov_eval, aln_score,
                          nodes, longest_reads)
     # rank hap pairs
-    escores_r = escores.rank()
+    # escores_r = escores.rank()
+    escores_r = escores.adjust()
     return ({'escores': escores_r, 'paths': cl_o['paths']})
 
 
@@ -108,23 +109,27 @@ class EvaluationScores:
 
     def rank(self):
         # rank each relevant metric
-        cov_metrics = ['cov_cor', 'cov_dev', 'hap_ll', 'cov_cosine']
-        # cov_metrics = ['cov_cor', 'cov_dev', 'cov_cosine', 'aln_score']
+        cov_metrics = ['cov_cor', 'cov_dev']
+        # cov_metrics = ['cov_cor', 'cov_dev', 'cov_cosine', 'hap_ll']
         aln_metrics = ['aln_score']
         # dict will store the rank for each metric and diplotype
         rk_m = {}
         for metric in cov_metrics + aln_metrics:
             # find unique values of the metric
-            uniq_m = set()
+            uniq_m = {}
             for dipn in self.scores:
-                uniq_m.add(self.scores[dipn][metric])
+                if self.scores[dipn][metric] not in uniq_m:
+                    uniq_m[self.scores[dipn][metric]] = 0
+                uniq_m[self.scores[dipn][metric]] += 1
             # sort them in decreasing order
-            uniq_sorted_m = list(uniq_m)
+            uniq_sorted_m = list(uniq_m.keys())
             uniq_sorted_m.sort(reverse=True)
             # prepare a map value -> position in that list
             rk_dict = {}
-            for idx, value in enumerate(uniq_sorted_m):
-                rk_dict[value] = idx
+            cum_idx = 0
+            for value in uniq_sorted_m:
+                rk_dict[value] = cum_idx
+                cum_idx += uniq_m[value]
             # save the rank for each diplotype
             rk_m[metric] = {}
             for dipn in self.scores:
@@ -136,6 +141,53 @@ class EvaluationScores:
                 rk += float(rk_m[metric][dipn]) / len(cov_metrics)
             for metric in aln_metrics:
                 rk += float(rk_m[metric][dipn]) / len(aln_metrics)
+            self.scores[dipn]['rank'] = rk
+        dip_sorted = sorted(self.scores, key=lambda k: self.scores[k]['rank'])
+        escores_r = []
+        for dipn in dip_sorted:
+            escores_r.append(self.scores[dipn])
+        return escores_r
+
+    def adjust(self):
+        # init adjusted score dict
+        adj_scores = {}
+        for dipn in self.scores:
+            adj_scores[dipn] = {}
+        # decide how to adjust each metric
+        adj_meth = {'cov_cor': 'max', 'cov_dev': 'minmax',
+                    'cov_cosine': 'max', 'hap_ll': 'minmax',
+                    'aln_score': 'max', 'aln_long_prop': 'max'}
+        # adjust each metric
+        for metric in adj_meth:
+            # find the minimum and maximum values
+            max_val = None
+            min_val = None
+            for dipn in self.scores:
+                if max_val is None or self.scores[dipn][metric] > max_val:
+                    max_val = self.scores[dipn][metric]
+                if min_val is None or self.scores[dipn][metric] < min_val:
+                    min_val = self.scores[dipn][metric]
+            if adj_meth[metric] == 'max':
+                # divide all scores by the max
+                for dipn in self.scores:
+                    adj_val = float(self.scores[dipn][metric]) / max_val
+                    adj_scores[dipn][metric] = adj_val
+            elif adj_meth[metric] == 'minmax':
+                # rescale to min val=0 and max_val=1
+                for dipn in self.scores:
+                    adj_val = self.scores[dipn][metric] - min_val
+                    adj_val = float(adj_val) / (max_val - min_val)
+                    adj_scores[dipn][metric] = adj_val
+        # rank each relevant metric
+        cov_metrics = ['cov_cor', 'cov_dev']
+        aln_metrics = ['aln_score', 'aln_long_prop']
+        # compute an overall "rank" for each diplotype
+        for dipn in self.scores:
+            rk = 0
+            for metric in cov_metrics:
+                rk += float(1 - adj_scores[dipn][metric]) / len(cov_metrics)
+            for metric in aln_metrics:
+                rk += float(1 - adj_scores[dipn][metric]) / len(aln_metrics)
             self.scores[dipn]['rank'] = rk
         dip_sorted = sorted(self.scores, key=lambda k: self.scores[k]['rank'])
         escores_r = []
@@ -898,18 +950,30 @@ class Subreads:
                 continue
             # split the reads at node involved in the cycle
             subreads = [[]]
-            subreads_t = []
+            add_subread = False
             for nod in reads.path[readn]:
-                if len(subreads_t) < len(subreads) and nod in node_group:
-                    subreads_t.append(node_group[nod])
                 if nod == cyc_l:
                     if len(subreads[-1]) > 0:
-                        subreads.append([])
+                        add_subread = True
                 if nod == cyc_r:
                     subreads[-1].append(nod)
-                    subreads.append([])
+                    add_subread = True
                 else:
+                    if add_subread:
+                        subreads.append([])
+                        add_subread = False
                     subreads[-1].append(nod)
+            subreads_t = []
+            for spath in subreads:
+                group = None
+                for nod in spath:
+                    if nod in node_group:
+                        group = node_group[nod]
+                        break
+                if group is None:
+                    print('Warning: problem splitting read')
+                    print(subreads)
+                subreads_t.append(group)
             # skip if just one subread and not in the region of interest
             if len(subreads_t) == 1 and subreads_t[0] != 'module':
                 continue
