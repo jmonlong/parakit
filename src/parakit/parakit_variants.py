@@ -31,13 +31,13 @@ class Variant:
         if self.end is not None:
             return (self.end)
         else:
-            return (self.pos)
+            return (self.pos + len(self.ref_seq))
 
     def toTsv(self, include_headers=False):
         res = []
         # potentially include the header
         headers = ['variant', 'pos', 'end', 'node', 'ref_trav', 'ref_seq',
-                   'alt_trav', 'alt_seq', 'copy']
+                   'alt_trav', 'alt_seq', 'copy', 'clinsig']
         if include_headers:
             res.append('\t'.join(headers))
         # prepare row for this variant
@@ -48,14 +48,35 @@ class Variant:
         ref_trav = '-'.join(ref_trav)
         res_r = fmt.format(self.getVariantID(), pos, end, self.alt_trav[0],
                            ref_trav, self.ref_seq, '_'.join(self.alt_trav),
-                           self.alt_seq, self.copy)
+                           self.alt_seq, self.copy, self.clinvar)
+        res.append(res_r)
+        return (res)
+
+    def toBed(self, chrom='chr6'):
+        res = []
+        # no headers, the columns are: chrom, start, end, variant id,
+        # score (1000 for clinvar variants, 0 otherwise)
+        # prepare row for this variant
+        fmt = '{}\t{}\t{}\t{}\t{}'
+        pos = self.pos - 1 if self.pos != 0 else 'NA'
+        end = self.getEnd() - 1
+        # make a variant ID
+        snode = self.alt_trav[0]
+        vid = snode
+        score = 0
+        if self.clinvar is not None:
+            vid += '_' + self.clinvar
+            score = 1000
+        else:
+            vid += '_{}-{}'.format(self.ref_seq, self.alt_seq)
+        res_r = fmt.format(chrom, pos, end, vid, score)
         res.append(res_r)
         return (res)
 
     def toReadTsv(self, include_headers=False):
         res = []
         # potentially include the header
-        headers = ['variant', 'pos', 'end', 'node', 'sig', 'copy',
+        headers = ['variant', 'pos', 'end', 'node', 'clinsig', 'copy',
                    'fusion_start_node', 'pos_ci', 'supp_reads',
                    'reads_alt', 'reads_ref']
         if include_headers:
@@ -463,7 +484,7 @@ class ConvertedVariants:
 
 
 def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
-                 min_support=3, output_tsv='calls.tsv'):
+                 min_support=3, output_tsv='calls.tsv', chrom='chr6'):
     # decomposePangenome(nodes, pos_offset)
     # look for read support for variant edges in vedges
     vars = ConvertedVariants(nmarkers)
@@ -497,9 +518,22 @@ def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
         inc_headers = False
 
     # write TSV output
-    print('Writing summary in ' + output_tsv + ' TSV...')
+    print('Writing full summary in ' + output_tsv + '...')
     with open(output_tsv, 'wt') as outf:
         outf.write('\n'.join(for_tsv) + '\n')
+
+    # write BED output
+    for_bed = []
+    for vid in var_ids:
+        # print or prepare the tsv output for this variant
+        for_bed += all_vars[vid].toBed(chrom=chrom)
+    # output BED file, remove .tsv extension is present
+    output_bed = output_tsv + '.bed'
+    if output_tsv.endswith('.tsv'):
+        output_bed = output_tsv[:-3] + 'bed'
+    print('Writing BED summary in ' + output_bed + '...')
+    with open(output_bed, 'wt') as outf:
+        outf.write('\n'.join(for_bed) + '\n')
 
 
 def readVariantCalls(filen):
@@ -516,7 +550,7 @@ def readVariantCalls(filen):
             pos_ci = line[heads.index('pos_ci')]
             if pos_ci != 'NA':
                 var.pos_error = int(pos_ci)
-            sig = line[heads.index('sig')]
+            sig = line[heads.index('clinsig')]
             if sig != 'None':
                 var.clinvar = sig
             var.alt_trav = []
@@ -582,8 +616,8 @@ def filterVariants(nodes, calls_fn, module=None, annotated_only=False,
         outf.write('\n'.join(for_tsv) + '\n')
 
 
-def decomposePangenome(nodes, pos_offset=0, output_tsv='variants.tsv',
-                       annot_fn=None):
+def decomposePangenome(nodes, pos_offset=0, output_fn='variants.bed',
+                       annot_fn=None, chrom='chr6'):
     # look for read support for variant edges in vedges
     vars = ConvertedVariants()
     vars.decomposePangenome(nodes)
@@ -594,6 +628,8 @@ def decomposePangenome(nodes, pos_offset=0, output_tsv='variants.tsv',
 
     # sort them by position
     var_ids = sorted(list(vars), key=lambda vid: vars[vid].pos)
+
+    # prepare TSV output
     inc_headers = True
     for_tsv = []
     for vid in var_ids:
@@ -602,9 +638,22 @@ def decomposePangenome(nodes, pos_offset=0, output_tsv='variants.tsv',
         inc_headers = False
 
     # write TSV output
-    print('Writing summary in ' + output_tsv + ' TSV...')
-    with open(output_tsv, 'wt') as outf:
+    print('Writing full summary in ' + output_fn + '...')
+    with open(output_fn, 'wt') as outf:
         outf.write('\n'.join(for_tsv) + '\n')
+
+    # prepare BED output
+    for_bed = []
+    for vid in var_ids:
+        for_bed += vars[vid].toBed(chrom=chrom)
+
+    # output BED file, remove .tsv extension is present
+    output_bed = output_fn + '.bed'
+    if output_fn.endswith('.tsv'):
+        output_bed = output_fn[:-3] + 'bed'
+    print('Writing BED summary in ' + output_bed + '...')
+    with open(output_bed, 'wt') as outf:
+        outf.write('\n'.join(for_bed) + '\n')
 
 
 class NodeCoverage:

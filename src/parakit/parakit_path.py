@@ -2453,7 +2453,9 @@ def mapReadsToHap(path, reads, max_node_gap=10):
         nread_edits = 0
         hpos = []
         aln_type = []
+        read_hap_pos = {}
         aln_pos = 0
+        cur_read_pos = 0
         for nod in read:
             # print('node {}; aln_pos {}'.format(nod, aln_pos))
             if (nod not in path_pos or aln_pos >= len(best_aln)
@@ -2476,10 +2478,13 @@ def mapReadsToHap(path, reads, max_node_gap=10):
                 # add the match
                 hpos.append(cur_hpos)
                 aln_type.append('match')
+                read_hap_pos[cur_read_pos] = cur_hpos
                 # move to next aligned position
                 aln_pos += 1
+            cur_read_pos += 1
         read_alns[readn]['aln_pos'] = hpos
         read_alns[readn]['aln_type'] = aln_type
+        read_alns[readn]['read_hap_pos'] = read_hap_pos
     return read_alns
 
 

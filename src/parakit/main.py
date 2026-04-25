@@ -5,6 +5,7 @@ import parakit.parakit_process as pkproc
 import parakit.parakit_variants as pkvar
 import parakit.parakit_path as pkpath
 import parakit.parakit_plot as pkplot
+import parakit.parakit_surject as pksurj
 import json
 import os
 
@@ -64,7 +65,7 @@ pars_deconstruct.add_argument('-n', help='node information', default='')
 pars_deconstruct.add_argument('-g', help='input GFA pangenome', default='')
 pars_deconstruct.add_argument('-a', help='annotation file (e.g. from ClinVar)',
                               default='')
-pars_deconstruct.add_argument('-o', help='output file', default='variants.tsv')
+pars_deconstruct.add_argument('-o', help='output TSV file', default='variants.tsv')
 pars_deconstruct.add_argument('-t', help='debug trace mode',
                               action='store_true')
 pars_deconstruct.set_defaults(scmd='deconstruct')
@@ -91,8 +92,8 @@ def scmd_deconstruct(args):
         clinvar_fn = None
 
     # decompose variants and annotate
-    pkvar.decomposePangenome(nodes, annot_fn=clinvar_fn,
-                             pos_offset=pos_offset, output_tsv=args.o)
+    pkvar.decomposePangenome(nodes, annot_fn=clinvar_fn, pos_offset=pos_offset,
+                             output_fn=args.o, chrom=c1[0])
 
 
 # map subcommand: map reads to the pangenome
@@ -165,7 +166,7 @@ def scmd_call(args):
     pkvar.findVariants(nodes=nodes, annot_fn=clinvar_fn,
                        reads=reads, nmarkers=args.m,
                        pos_offset=pos_offset,
-                       output_tsv=args.o)
+                       output_tsv=args.o, chrom=c1[0])
 
 
 # call subcommand: calls variant by aggregating read support
@@ -506,6 +507,65 @@ def scmd_gafstats(args):
     return (True)
 
 
+# surject subcommand: surject alignments to the linear reference
+pars_surject = spars.add_parser('surject',
+                                help='project reads to the linear reference')
+pars_surject.add_argument('-r', required=True, help='input alignments in GAF')
+pars_surject.add_argument('-j', help='config JSON file', required=True)
+pars_surject.add_argument('-g', help='input GFA pangenome', default='')
+pars_surject.add_argument('-f', help='input fastq reads', default='')
+pars_surject.add_argument('-n', help='node information', default='')
+pars_surject.add_argument('-d', help='diplotype paths, sorted', default='')
+pars_surject.add_argument('-p', help='haplotype paths information', default='')
+pars_surject.add_argument('-o', help='output BAM file', default='')
+pars_surject.set_defaults(scmd='surject')
+
+
+def scmd_surject(args):
+    # default output name
+    if args.o == '':
+        args.o = 'surjected_subreads.bam'
+    # try to guess the fastq file?
+    if args.f == '':
+        fq_fn = args.r + '.fq'
+        if os.path.isfile(fq_fn):
+            print("Guessing that the fastq is " + fq_fn)
+            args.f = fq_fn
+        else:
+            print("Couldn't guess the fastq file. Please provide it with -f.")
+            exit(1)
+    # read config json file
+    config = json.load(open(args.j, 'rt'))
+    # update/guess paths before
+    # load node info
+    node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
+    nodes = pkio.readNodeInfo(node_fn)
+    # update with edge information
+    pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
+    pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=True)
+    # read GAF
+    reads = pkio.readGAF(args.r, nodes, verbose=True)
+    # read diplotype
+    dip_paths = None
+    if args.d != '' and args.p != '':
+        dip_paths = pkio.readDiplotype(args.d, args.p, verbose=True)
+    # identify subreads of interest
+    if dip_paths is None:
+        sel_sreads = pksurj.selectSubreads(reads, nodes, module='c2')
+    else:
+        sel_sreads = pksurj.selectSubreadsOnDip(reads, nodes, dip_paths)
+    # extract them as fastqs
+    sreads_fq = args.o + '.fq'
+    pkproc.extractSubreads(sel_sreads, args.f, sreads_fq)
+    # map them to the linear reference
+    sreads_sam = pkproc.mapMinimap2Local(sreads_fq, config['ref_fa'],
+                                         config['c2'])
+    os.remove(sreads_fq)
+    # filter and annotate them
+    pkproc.filterAnnotateSam(sreads_sam, sel_sreads, config['c2'], args.o)
+    return (True)
+
+
 def main():
     args = pars.parse_args()
 
@@ -531,3 +591,5 @@ def main():
         scmd_gafstats(args)
     elif args.scmd == 'annotate':
         scmd_annotate(args)
+    elif args.scmd == 'surject':
+        scmd_surject(args)

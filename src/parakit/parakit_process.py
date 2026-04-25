@@ -486,3 +486,143 @@ def toolAvailable(tool_name):
     check_o = subprocess.run(check_cmd, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
     return (check_o.returncode == 0)
+
+
+def extractSubreads(sel_sreads, in_fq_fn, out_fq_fn):
+    # load fastq file (sequence and base qualities)
+    fq_seq = {}
+    fq_bq = {}
+    inf = open(in_fq_fn, 'rt')
+    cur_readn = None
+    line_i = 0
+    for line in inf:
+        line = line.rstrip()
+        if line_i % 4 == 0:
+            # extract read name
+            cur_readn = line[1:]
+        elif line_i % 4 == 1:
+            # extract sequence
+            fq_seq[cur_readn] = line
+        elif line_i % 4 == 3:
+            # extract base qualities
+            fq_bq[cur_readn] = line
+        line_i += 1
+    inf.close()
+    # extract subreads and write to output fastq
+    outf = open(out_fq_fn, 'wt')
+    for sreadn in sel_sreads:
+        readn = sel_sreads[sreadn]['read']
+        if readn not in fq_seq:
+            continue
+        pos_s = sel_sreads[sreadn]['start']
+        pos_e = sel_sreads[sreadn]['end']
+        seq = fq_seq[readn][pos_s:(pos_e + 1)]
+        bq = fq_bq[readn][pos_s:(pos_e + 1)]
+        outf.write("@{}\n{}\n+\n{}\n".format(sreadn, seq, bq))
+    outf.close()
+
+
+def mapMinimap2Local(fq_fn, ref_fa_fn, region):
+    # extract the local reference region
+    temp_fa = fq_fn + '.ref.fa'
+    samtools_cmd = ['samtools', 'faidx', '-o', temp_fa, ref_fa_fn, region]
+    subprocess.run(samtools_cmd, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # map
+    minimap2_cmd = ['minimap2',  '-x', 'map-ont', '-a', '-t', '1', '-N', '100',
+                    temp_fa, fq_fn]
+    minimap2_o = subprocess.run(minimap2_cmd, check=True, capture_output=True)
+    os.remove(temp_fa)
+    # get header for the full reference
+    getdict_cmd = ['samtools',  'dict', '-H', ref_fa_fn]
+    getdict_o = subprocess.run(getdict_cmd, check=True, capture_output=True)
+    sq_headers = getdict_o.stdout.decode().rstrip().split('\n')
+    # fix headers
+    out_sam = []
+    for line in minimap2_o.stdout.decode().split('\n'):
+        # skip empty (last) line
+        if line == '':
+            continue
+        # write header
+        if line[0] == '@':
+            # skip SQ headers
+            if line[:3] == '@SQ':
+                continue
+            out_sam.append(line)
+            # add full genome SQ headers
+            if line[:3] == '@HD':
+                out_sam += sq_headers
+            continue
+        # add sam records
+        out_sam.append(line)
+    return out_sam
+
+
+def filterAnnotateSam(sam, sel_sreads, region, out_bam_fn):
+    # prepare the target region
+    region_v = region.split(':')
+    # seqn_t = region_v[0]
+    # add some flanking to rescue reads starting around the target region
+    pos_s_t = int(region_v[1].split('-')[0])
+    # pos_e_t = int(region_v[1].split('-')[1])
+    # start streaming the SAM and writting it to the temporary file
+    temp_sam_fn = out_bam_fn + '.sam'
+    sam_f = open(temp_sam_fn, 'wt')
+    sread_done = set()
+    for line in sam:
+        # skip empty (last) line
+        if line == '':
+            continue
+        # write header
+        if line[0] == '@':
+            sam_f.write(line + '\n')
+            continue
+        # parse the SAM record
+        line_v = line.split('\t')
+        sreadn = line_v[0]
+        # seqn = line_v[2]
+        # fix the chromosome name from chr6:start-pos to chr6
+        seqn = line_v[2].split(':')
+        line_v[2] = seqn[0]
+        # update the position, adding the offset
+        pos = int(line_v[3])
+        line_v[3] = str(pos + pos_s_t - 1)
+        # # change mapping quality and flag
+        # line_v[4] = '60'
+        # line_v[1] = '0'
+        # skip if not part of the target reads (shouldn't happen?)
+        if sreadn not in sel_sreads:
+            continue
+        # skip if already outputed one
+        # (assuming they're ordered by quality for now)
+        if sreadn in sread_done:
+            continue
+        # # check if in the target region
+        # if seqn == seqn_t and pos > pos_s_t and pos < pos_e_t:
+        #     sam_f.write('\t'.join(line_v) + '\n')
+        #     # mark this read as done
+        #     sread_done.add(sreadn)
+        # add tag with read name
+        line_v.append('rn:Z:' + sel_sreads[sreadn]['read'])
+        # add other tags, if present
+        if 'module' in sel_sreads[sreadn]:
+            line_v.append('md:Z:' + sel_sreads[sreadn]['module'])
+        if 'haplotype' in sel_sreads[sreadn]:
+            line_v.append('hp:Z:' + sel_sreads[sreadn]['haplotype'])
+        # write the SAM record
+        sam_f.write('\t'.join(line_v) + '\n')
+        # mark this read as done
+        sread_done.add(sreadn)
+    sam_f.close()
+    # convert to BAM
+    samtools_cmd = ['samtools', 'sort', '-o', out_bam_fn, temp_sam_fn]
+    subprocess.run(samtools_cmd, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    os.remove(temp_sam_fn)
+    # index bam
+    samtools_cmd = ['samtools', 'index', out_bam_fn]
+    subprocess.run(samtools_cmd, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # log
+    print('{} subreads selected'.format(len(sel_sreads)))
+    print('{} subreads mapped'.format(len(sread_done)))

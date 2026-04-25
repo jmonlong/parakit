@@ -176,6 +176,40 @@ For the reads and diplotype panels, points are colored to highlight informative 
 Informative nodes/points are slightly shifted to help distinguish them.
 The reads/haplotypes are split in parts when they loop back in the pangenome.
 
+## Visualization in IGV
+
+To facilitate the visualization of the reads and variant calls, Parakit can project/surject the reads from the pangenome to the *gene* module on the reference genome. 
+Actually, reads are first split into subreads covering at most one module.
+
+The `surject` subcommand produces an indexed BAM file that can be imported in [IGV](https://igv.org/), or used with variant calling/phasing pipeline to call novel small variants.
+If diplotype files are provided (output of `parakit diplotype`), all subreads will be surjected and tagged with the assigned haplotype (*hp* tag) and module (i.e. haplotype + module number, *md* tag).
+Otherwise, only reads that seem to originate from the *gene* module are surjected to help focus on potential novel small variants in the CYP21A2.
+
+```sh
+# *gene* subreads only (no tags)
+parakit surject -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -f reads.fastq -o surjected_subreads.bam
+
+# all subreads with haplotype/module tags from the diplotyping result
+parakit surject -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -f reads.fastq -d diplotype.paths-stats.tsv -p diplotype.paths-info.tsv -o surjected_subreads.bam
+```
+
+For information, the variants in the pangenome can be listed using `parakit deconstruct`:
+
+```sh
+parakit deconstruct -j rccx.grch38_hprc.mc.config.json -o rccx.grch38_hprc.mc.decon.tsv
+```
+
+This command also creates a BED file (*rccx.grch38_hprc.mc.decon.bed*) that can be loaded in IGV.
+
+Similarly, the variants called by `parakit call` can also be loaded as a BED, for example *calls.bed* produced by:
+
+```sh
+parakit call -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o calls.tsv
+```
+
+By loading the surjected BAM and those BED files in IGV, we can investigate the result of the diplotyping and explore potential new variants that were absent from the pangenome. 
+
+
 ## Citation
 
 For now, please cite [our preprint on medRxiv](https://www.medrxiv.org/content/10.1101/2025.02.07.25321404v1):
