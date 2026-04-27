@@ -518,6 +518,7 @@ pars_surject.add_argument('-n', help='node information', default='')
 pars_surject.add_argument('-d', help='diplotype paths, sorted', default='')
 pars_surject.add_argument('-p', help='haplotype paths information', default='')
 pars_surject.add_argument('-o', help='output BAM file', default='')
+pars_surject.add_argument('-t', help='debug trace mode', action='store_true')
 pars_surject.set_defaults(scmd='surject')
 
 
@@ -542,13 +543,13 @@ def scmd_surject(args):
     nodes = pkio.readNodeInfo(node_fn)
     # update with edge information
     pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
-    pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=True)
+    pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=args.t)
     # read GAF
-    reads = pkio.readGAF(args.r, nodes, verbose=True)
+    reads = pkio.readGAF(args.r, nodes, verbose=args.t)
     # read diplotype
     dip_paths = None
     if args.d != '' and args.p != '':
-        dip_paths = pkio.readDiplotype(args.d, args.p, verbose=True)
+        dip_paths = pkio.readDiplotype(args.d, args.p, verbose=args.t)
     # identify subreads of interest
     if dip_paths is None:
         sel_sreads = pksurj.selectSubreads(reads, nodes, module='c2')
@@ -561,8 +562,8 @@ def scmd_surject(args):
     sreads_sam = pkproc.mapMinimap2Local(sreads_fq, config['ref_fa'],
                                          config['c2'])
     os.remove(sreads_fq)
-    # filter and annotate them
-    pkproc.filterAnnotateSam(sreads_sam, sel_sreads, config['c2'], args.o)
+    # annotate with read name, and potentially haplotype/module info
+    pkproc.annotateSam(sreads_sam, sel_sreads, args.o, verbose=args.t)
     return (True)
 
 

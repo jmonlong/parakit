@@ -2,9 +2,43 @@ import statistics
 
 
 class Variant:
+    """Variant information
+
+    Information about a variant and supporting reads.
+
+    Attributes:
+        ref_trav : reference traversal (list of node names)
+        alt_trav : alternate traversal (list of node names)
+        ref_seq : reference sequence
+        alt_seq : alternate sequence
+        reads_ref : set of reads names supporting the reference allele
+        reads_alt : set of reads names supporting the alternate allele
+        pos : position
+        end : end position
+        pos_error : error margin for the variant position (for fusions)
+        copy : which module/copy is it located on (c1/c2)
+        varid : the variant ID
+        clinvar : clinvar label (or None)
+
+    Methods:
+        addRefRead : Add a read supporting the reference allele
+        addAltRead : Add a read supporting the alternate allele
+        toTsv : String representation for a TSV output
+        toBed : String representation for a BED output
+        toReadTsv : String representation for the per-read TSV output
+        assignCopy : Place the variant on the module/copy c1 or c2
+        findRefTraversal : Find the reference traversal in the pangenome
+        getVariantID : Get or create a variant ID
+        findPosition : Find the start position of the variant
+        findRefSequence : Find the sequence of the reference allele
+        findAltSequence : Find the sequence of the alternate allele
+        fillInfo : Fill most information from the node info
+        fillFusionInfo : Fill variant information for fusions
+        offsetPosition : Add an offset to the start and end positions
+    """
+
     def __init__(self, ref_trav=None, alt_trav=None,
                  ref_seq=None, alt_seq=None, varid=None):
-        # list of reference traversals
         self.ref_trav = ref_trav
         self.alt_trav = alt_trav
         self.ref_seq = ref_seq
@@ -19,9 +53,11 @@ class Variant:
         self.clinvar = None
 
     def addRefRead(self, readn):
+        """Add a read supporting the reference allele"""
         self.reads_ref.add(readn)
 
     def addAltRead(self, readn):
+        """Add a read supporting the alternate allele"""
         self.reads_alt.add(readn)
 
     def nAltReads(self):
@@ -34,6 +70,7 @@ class Variant:
             return (self.pos + len(self.ref_seq))
 
     def toTsv(self, include_headers=False):
+        """String representation for a TSV output"""
         res = []
         # potentially include the header
         headers = ['variant', 'pos', 'end', 'node', 'ref_trav', 'ref_seq',
@@ -53,7 +90,7 @@ class Variant:
         return (res)
 
     def toBed(self, chrom='chr6'):
-        res = []
+        """String representation for a BED output"""
         # no headers, the columns are: chrom, start, end, variant id,
         # score (1000 for clinvar variants, 0 otherwise)
         # prepare row for this variant
@@ -69,18 +106,18 @@ class Variant:
             score = 1000
         else:
             vid += '_{}-{}'.format(self.ref_seq, self.alt_seq)
-        res_r = fmt.format(chrom, pos, end, vid, score)
-        res.append(res_r)
+        res = fmt.format(chrom, pos, end, vid, score)
         return (res)
 
     def toReadTsv(self, include_headers=False):
-        res = []
+        """String representation for the per-read TSV output"""
+        res = ""
         # potentially include the header
         headers = ['variant', 'pos', 'end', 'node', 'clinsig', 'copy',
                    'fusion_start_node', 'pos_ci', 'supp_reads',
                    'reads_alt', 'reads_ref']
         if include_headers:
-            res.append('\t'.join(headers))
+            res = '\t'.join(headers) + "\n"
         # prepare one row per read
         fmt = '\t'.join(['{}'] * len(headers))
         pos = self.pos if self.pos != 0 else 'NA'
@@ -97,10 +134,19 @@ class Variant:
         res_r = fmt.format(self.getVariantID(), pos, end, node,
                            self.clinvar, self.copy, node_fstart, pos_ci,
                            len(self.reads_alt), reads_alt, reads_ref)
-        res.append(res_r)
+        res += res_r
         return (res)
 
     def assignCopy(self, nodes):
+        """Place the variant on the module/copy c1 or c2
+
+        Look at the alternate traversal to guess if the variant is
+        most likely on the c1 (pseudogene) or c2 (gene) module.
+
+        Args:
+            nodes : dict with node information
+
+        """
         # is it a variant path relative to c1 or c2?
         c1_balance = 0
         for node in self.alt_trav:
@@ -115,25 +161,47 @@ class Variant:
             self.copy = 'c1'
 
     def findRefTraversal(self, nodes):
+        """Find the reference traversal in the pangenome
+
+        Explore the paths following reference nodes or nodes in the
+        copy assigned to the variant. Abort if traversal is longer
+        than 20 nodes.
+
+        Args:
+            nodes : dict with node information
+
+        """
+        # if needed, find if the variant is on the c1 or c2 module
+        if self.copy is None:
+            self.assignCopy(nodes)
+        # explore a set of paths
         ref_paths = [[self.alt_trav[0]]]
         self.ref_trav = []
         while len(ref_paths) > 0 and len(ref_paths) < 1000:
             ref_path = ref_paths.pop()
             if len(ref_path) > 20:
+                # don't explore traversals longer than 20 nodes
                 continue
+            # check ech next node
             for n_next in nodes[ref_path[-1]]['sucs']:
                 if n_next == self.alt_trav[-1]:
+                    # the next node reaches the other boundary
                     self.ref_trav.append(ref_path + [n_next])
-                elif nodes[n_next]['class'] == 'none' or (nodes[n_next]['class'] == 'c2' and self.copy == 'c2') or (nodes[n_next]['class'] == 'c1' and self.copy == 'c1'):
+                elif (nodes[n_next]['class'] == 'none' or
+                      (nodes[n_next]['class'] == 'c2' and self.copy == 'c2') or
+                      (nodes[n_next]['class'] == 'c1' and self.copy == 'c1')):
+                    # the next node is still a reference or reference copy node
                     ref_paths.append(ref_path + [n_next])
 
     def getVariantID(self):
+        """Get or create a variant ID"""
         if self.varid is None:
             return ('_'.join(self.alt_trav))
         else:
             return (self.varid)
 
     def findPosition(self, nodes):
+        """Find the start position of the variant"""
         if self.copy is None:
             self.assignCopy(nodes)
         if self.copy == 'c1':
@@ -143,16 +211,19 @@ class Variant:
         self.pos += nodes[self.alt_trav[0]]['size']
 
     def findRefSequence(self, nodes):
+        """Find the sequence of the reference allele"""
         if self.ref_seq is not None:
             print("Warning: Overwriting reference sequence for variant " +
                   self.getVariantID())
         if self.ref_trav is not None:
             self.ref_seq = ''
             if len(self.ref_trav) > 0:
+                # use the first reference traversal
                 for node in self.ref_trav[0][1:-1]:
                     self.ref_seq += nodes[node]['seq']
 
     def findAltSequence(self, nodes):
+        """Find the sequence of the alternate allele"""
         if self.alt_seq is not None:
             print("Warning: Overwriting alternate sequence for variant " +
                   self.getVariantID())
@@ -161,6 +232,7 @@ class Variant:
             self.alt_seq += nodes[node]['seq']
 
     def fillInfo(self, nodes):
+        """Fill most information from the node info"""
         self.assignCopy(nodes)
         self.findRefTraversal(nodes)
         self.findPosition(nodes)
@@ -168,6 +240,7 @@ class Variant:
         self.findRefSequence(nodes)
 
     def fillFusionInfo(self, nodes):
+        """Fill variant information for fusions"""
         # find the start and end position of a fusion
         # based on the alt traversal and copy
         assert self.alt_trav is not None and self.copy is not None, \
@@ -190,12 +263,18 @@ class Variant:
         self.pos_error = round((abs(u1 - d1) + abs(u2 - d2)) / 4)
 
     def offsetPosition(self, offset):
+        """Add an offset to the start and end positions"""
         self.pos += offset
         if self.end is not None:
             self.end += offset
 
 
 class Fusions:
+    """Manage fusion candidates
+
+    Process reads, create candidate fusions, and reports independent
+    fusion signal.
+    """
     def __init__(self, nmarkers=10):
         # potential fusion variants (varid -> Variant object)
         self.variants = {}
@@ -203,6 +282,7 @@ class Fusions:
         self.nmarkers = nmarkers
 
     def importReads(self, reads, nodes, support_only=False):
+        """Process a set of reads and extract markers split by subread"""
         # find cycling nodes to split into subreads
         cyc_nodes = set()
         for node in nodes:
@@ -212,36 +292,34 @@ class Fusions:
         for readn in reads.path:
             path = reads.path[readn]
             # extract marker sequence for each subread
-            subread_to_markers = {}
             cur_markers = []
             cur_nodes = []
-            for node in path:
-                if node in cyc_nodes:
+            subread_cpt = 0
+            for nii, node in enumerate(path):
+                # have we reached the end (of the module or the read)?
+                if (node in cyc_nodes or nii == len(path) - 1):
+                    # then do we have enough markers?
                     if len(cur_nodes) > 2 * self.nmarkers:
-                        # save current subread
-                        sreadn = readn + '_sr' + str(len(subread_to_markers))
-                        subread_to_markers[sreadn] = {
-                            'markers': cur_markers,
-                            'nodes': cur_nodes
-                        }
+                        # yes, save current subread
+                        sreadn = readn + '_sr' + str(subread_cpt)
+                        subread_cpt += 1
+                        self.importSubread(cur_markers, cur_nodes, sreadn,
+                                           support_only=support_only)
+                    # start a new set of markers/nodes
                     cur_markers = []
                     cur_nodes = []
                 elif nodes[node]['class'] in ['c1', 'c2']:
                     # this is a marker to record
                     cur_markers.append(nodes[node]['class'])
                     cur_nodes.append(node)
-            # import each subread
-            for sreadn in subread_to_markers:
-                self.importSubread(subread_to_markers[sreadn]['markers'],
-                                   subread_to_markers[sreadn]['nodes'],
-                                   sreadn, support_only=support_only)
 
     def importSubread(self, markers, nodes, sreadn, support_only=False):
+        """Process a set of markers for a subread"""
         u_c1 = 0
         u_c2 = 0
         d_c1 = markers.count('c1')
         d_c2 = markers.count('c2')
-        # test for a module switch across the markers by subread
+        # test for a module switch across the markers
         for idx, marker in enumerate(markers):
             # update the counts
             if marker == 'c1':
@@ -324,6 +402,28 @@ class Fusions:
 
 
 class ConvertedVariants:
+    """Collection of small Variants
+
+    Manages small variants that might have been created by small gene
+    conversions of the gene by the pseudogene.
+
+    Attributes:
+        variants : dict variant ID -> Variant object
+        nmarkers : "context" parameter used to assign a copy
+        pos_to_varids : dict start position -> list of variant IDs
+        node_to_varids : dict node ID (first boundary) -> list of variant IDs
+
+    Methods:
+        addVariant : add a Variant to the collection
+        decomposePangenome : enumerate all variants in the pangenome
+        matchAnnotation : look for annotated variants in the pangenome variants
+        importReads : tally evidence for each variants across a set of reads
+        checkReadSupport : helper function to update read support for a variant
+        filterVariants : keep only variants with a minimum read support
+        offsetPositions : add an offset to the position of all variants
+
+    """
+
     def __init__(self, nmarkers=10):
         # potential converted variants (varid -> Variant object)
         self.variants = {}
@@ -334,6 +434,7 @@ class ConvertedVariants:
         self.node_to_varids = {}
 
     def addVariant(self, var):
+        """Add a Variant to the collection"""
         varid = var.getVariantID()
         self.variants[varid] = var
         # update the pos/node index
@@ -345,6 +446,7 @@ class ConvertedVariants:
         self.node_to_varids[var.alt_trav[0]].append(varid)
 
     def decomposePangenome(self, nodes):
+        """Enumerate all variants in the pangenome"""
         # check for variant starting at any node
         for n_start in nodes:
             # well not any node, only if it's on the reference path
@@ -382,6 +484,7 @@ class ConvertedVariants:
                     self.addVariant(var)
 
     def matchAnnotation(self, filen, offset):
+        """Look for annotated variants in the pangenome variants"""
         # read the input tsv file
         inf = open(filen, 'rt')
         heads = next(inf).rstrip().split('\t')
@@ -417,6 +520,7 @@ class ConvertedVariants:
         print('{} annotated variants matched.'.format(n_matched))
 
     def importReads(self, reads, nodes):
+        """Tally evidence for each variants across a set of reads"""
         for readn in reads.path:
             path = reads.path[readn]
             # save which variants edges are taken by this read
@@ -443,6 +547,7 @@ class ConvertedVariants:
                     self.checkReadSupport(varid, path[pos:], readn)
 
     def checkReadSupport(self, varid, read, readn):
+        """Helper function to update read support for a variant"""
         var = self.variants[varid]
         # assign to alt allele if first edge matches
         alt_support = True
@@ -470,8 +575,9 @@ class ConvertedVariants:
             var.addAltRead(readn)
         elif ref_support and not alt_support:
             var.addRefRead(readn)
-    
+
     def filterVariants(self, min_support=3):
+        """Keep only variants with a minimum read support"""
         selected_vars = {}
         for varid in self.variants:
             if self.variants[varid].nAltReads() >= min_support:
@@ -479,13 +585,31 @@ class ConvertedVariants:
         self.variants = selected_vars
 
     def offsetPositions(self, offset):
+        """Add an offset to the position of all variants"""
         for varid in self.variants:
             self.variants[varid].offsetPosition(offset)
 
 
 def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
                  min_support=3, output_tsv='calls.tsv', chrom='chr6'):
-    # decomposePangenome(nodes, pos_offset)
+    """Call variants from aligned reads
+
+    Identify variants in the pangenome, match with an annotation file,
+    then look for gene-converted or fusion variants. Reports the
+    called variants in a TSV and BED files.
+
+    Args:
+        nodes : dict with node information
+        annot_fn : path to the annotation file
+        reads : a Reads object, e.g. read by readGAF
+        nmarkers : how many markers to use for calling and copy assignment
+        pos_offset : how much to offset the reported positions
+        min_support : minimum read support to report a variant
+        output_tsv : file name for the output TSV
+        chrom : chromosome name for the output BED file
+
+    Returns: write a TSV and BED file with variant information
+    """
     # look for read support for variant edges in vedges
     vars = ConvertedVariants(nmarkers)
     vars.decomposePangenome(nodes)
@@ -510,40 +634,49 @@ def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
 
     # sort them by position
     var_ids = sorted(list(all_vars), key=lambda vid: all_vars[vid].pos)
-    inc_headers = True
-    for_tsv = []
-    for vid in var_ids:
-        # print or prepare the tsv output for this variant
-        for_tsv += all_vars[vid].toReadTsv(inc_headers)
-        inc_headers = False
 
     # write TSV output
     print('Writing full summary in ' + output_tsv + '...')
     with open(output_tsv, 'wt') as outf:
-        outf.write('\n'.join(for_tsv) + '\n')
+        inc_headers = True
+        for vid in var_ids:
+            outf.write(all_vars[vid].toReadTsv(inc_headers) + '\n')
+            inc_headers = False
 
     # write BED output
-    for_bed = []
-    for vid in var_ids:
-        # print or prepare the tsv output for this variant
-        for_bed += all_vars[vid].toBed(chrom=chrom)
     # output BED file, remove .tsv extension is present
     output_bed = output_tsv + '.bed'
     if output_tsv.endswith('.tsv'):
         output_bed = output_tsv[:-3] + 'bed'
     print('Writing BED summary in ' + output_bed + '...')
     with open(output_bed, 'wt') as outf:
-        outf.write('\n'.join(for_bed) + '\n')
+        for vid in var_ids:
+            outf.write(all_vars[vid].toBed(chrom=chrom) + '\n')
 
 
 def readVariantCalls(filen):
+    """Read a TSV with variant calls
+
+    Read the file written by `parakit call` and load the Variant
+    information in a dict.
+
+    Args:
+        filen : path to the TSV input file
+
+    Returns: a dict variant ID -> Variant object
+
+    """
+    # save the Variant objects in this dict
     variants = {}
+    # open file and read headers
     inf = open(filen, 'rt')
     heads = next(inf).rstrip().split('\t')
+    # process each variant line
     for line in inf:
         line = line.rstrip().split('\t')
         varid = line[heads.index('variant')]
         if varid not in variants:
+            # create a new variant
             var = Variant(varid=varid)
             var.pos = int(line[heads.index('pos')])
             var.end = int(line[heads.index('end')])
@@ -559,6 +692,7 @@ def readVariantCalls(filen):
                 var.alt_trav.append(node_fstart)
             var.alt_trav.append(line[heads.index('node')])
             var.copy = line[heads.index('copy')]
+            # add to the dict
             variants[varid] = var
         # update read support
         reads_ref = line[heads.index('reads_ref')]
@@ -578,6 +712,24 @@ def filterVariants(nodes, calls_fn, module=None, annotated_only=False,
                    fusion_only=False,
                    start_pos=None, end_pos=None,
                    output_tsv='calls.filtered.tsv'):
+    """Filter calls from a TSV file
+
+    Read the calls from `parakit call` and filter them, by type,
+    region, or status in the annotation.
+
+    Args:
+        nodes : dict with node information
+        calls_fn : path to the input TSV file with the calls
+        module : module number (1 or 2)
+        annotated_only : should we only output annotated variants?
+        fusion_only : should we only output fusions?
+        start_pos : start position of the target region
+        end_pos : end position of the target region
+        output_tsv : path to the output file
+
+    Returns: writes a new TSV file.
+
+    """
     variants = readVariantCalls(calls_fn)
     sel_ids = []
     for varid in variants:
@@ -618,6 +770,21 @@ def filterVariants(nodes, calls_fn, module=None, annotated_only=False,
 
 def decomposePangenome(nodes, pos_offset=0, output_fn='variants.bed',
                        annot_fn=None, chrom='chr6'):
+    """Decompose/deconstruct the pangenome
+
+    Enumerate variants from the bubbles in the pangenome. If provided,
+    try to match variants in the annotation.
+
+    Args:
+        nodes : dict with node information
+        pos_offset : how much to offset the positions
+        output_fn : filename for the output TSV
+        annot_fn : if not None, the path to the annotation TSV file
+        chrom : the chromosome name to use in the BED.
+
+    Returns: writes variant information in a TSV and a BED file
+
+    """
     # look for read support for variant edges in vedges
     vars = ConvertedVariants()
     vars.decomposePangenome(nodes)
@@ -822,7 +989,7 @@ class NodeCoverage:
             print('{}\t{}\t{}\t{}'.format(self.nodeid, self.bins_start[ii],
                                           self.bins_end[ii],
                                           self.bins_cov[ii]))
-    
+
 
 def estimateCopyNumberFromFlanks(nodes, reads, window_size=20):
     fl = 0
@@ -865,9 +1032,10 @@ def estimateCopyNumberFromFlanks(nodes, reads, window_size=20):
 
 
 def mode(x, min_value=0, bin_size_pct=10):
+    """Estimate the mode of a distribution"""
     x.sort()
     x_mean = statistics.mean(x)
-    # compute the number of element within 1% of the mean for each position
+    # compute the number of element within X% of the mean for each position
     diff_th = x_mean * bin_size_pct / 100
     bin_max_ii = None
     bin_max_n = 0
@@ -884,8 +1052,8 @@ def mode(x, min_value=0, bin_size_pct=10):
     return (statistics.median(x[bin_max_ii:(bin_max_ii+bin_max_n)]))
 
 
-def estimateCopyNumber(nodes, reads, out_tsv_prefix='parakit.cn', window_size=20,
-                       bin_size=50):
+def estimateCopyNumber(nodes, reads, out_tsv_prefix='parakit.cn',
+                       window_size=20, bin_size=50):
     # estimate from the flanks
     estimateCopyNumberFromFlanks(nodes, reads, window_size=window_size)
     # compute coverage on reference nodes

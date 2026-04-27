@@ -2541,7 +2541,7 @@ def initConfPath(config):
         conf['min_read_len_u'] = 10000
         conf['min_read_len_s'] = 2000
         conf['module_copies_l'] = 2
-        conf['module_copies_u'] = 6
+        conf['module_copies_u'] = 8
         conf['min_mark_supp_l'] = .1
         conf['min_mark_supp_u'] = .9
         conf['min_mark_supp_s'] = .4

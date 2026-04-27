@@ -16,6 +16,20 @@ def writeFasta(outfn, seqn, seq, wrap=80):
 
 
 def getRegionsFromConfig(config):
+    """Extract information about the region of interest from the config file
+
+    Adds the flank size to the target regions. Useful to get the
+    offset of the pangenome start position relative to the full human
+    genome.
+
+    Args:
+        config : dict with the config information (read from the JSON)
+
+    Returns: a tuple with the coordinates of copy 1 and 2 (as ['chr6',
+    [START, END]]) and the start/end position of the whole extracted
+    region.
+
+    """
     c1 = config['c1'].split(':')
     c1[1] = [int(xx) for xx in c1[1].split('-')]
     c2 = config['c2'].split(':')
@@ -482,6 +496,7 @@ def runRscript(script_r, args):
 
 
 def toolAvailable(tool_name):
+    """Check if a tool is available using *which*"""
     check_cmd = ['which', tool_name]
     check_o = subprocess.run(check_cmd, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
@@ -489,6 +504,24 @@ def toolAvailable(tool_name):
 
 
 def extractSubreads(sel_sreads, in_fq_fn, out_fq_fn):
+    """Extract subreads from a FASTQ file and write to a new FASTQ
+
+    Reads the raw FASTQ file with all the reads, select reads of
+    interest, split them into subreads and write to a new FASTQ file.
+
+    Args:
+        sel_sreads : subreads selection from selectSubreads/selectSubreadsOnDip
+                subread name -> - 'read' name
+                                - 'start' position in read
+                                - 'end' position in read
+                                - 'haplotype' name  (is diplotype info)
+                                - 'module' name  (is diplotype info)
+        in_fq_fn : path to the raw FASTQ file with all reads
+        out_fq_fn : name of the output FASTQ file
+
+    Returns: writes a new FASTQ file
+
+    """
     # load fastq file (sequence and base qualities)
     fq_seq = {}
     fq_bq = {}
@@ -523,22 +556,33 @@ def extractSubreads(sel_sreads, in_fq_fn, out_fq_fn):
 
 
 def mapMinimap2Local(fq_fn, ref_fa_fn, region):
+    """Map reads with minimap2 on a target region of the reference
+
+    Extract the target reference region and map the reads in an input
+    FASTQ. Rename sequences and offset the positions to match the full
+    genome. Also use headers from the full genome.
+
+    Args:
+        fq_fn : input FASTQ file
+
+    Returns: a list of string with the SAM headers and read records
+
+    """
     # extract the local reference region
     temp_fa = fq_fn + '.ref.fa'
     samtools_cmd = ['samtools', 'faidx', '-o', temp_fa, ref_fa_fn, region]
     subprocess.run(samtools_cmd, check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     # map
-    minimap2_cmd = ['minimap2',  '-x', 'map-ont', '-a', '-t', '1', '-N', '100',
+    minimap2_cmd = ['minimap2',  '-x', 'map-ont', '-a', '-t', '1',
                     temp_fa, fq_fn]
     minimap2_o = subprocess.run(minimap2_cmd, check=True, capture_output=True)
     os.remove(temp_fa)
     # get header for the full reference
-    getdict_cmd = ['samtools',  'dict', '-H', ref_fa_fn]
-    getdict_o = subprocess.run(getdict_cmd, check=True, capture_output=True)
-    sq_headers = getdict_o.stdout.decode().rstrip().split('\n')
-    # fix headers
+    sq_headers = prepareSQheaders(ref_fa_fn)
+    # fix headers and offset positions
     out_sam = []
+    reg_start_pos = int(region.split(':')[1].split('-')[0])
     for line in minimap2_o.stdout.decode().split('\n'):
         # skip empty (last) line
         if line == '':
@@ -553,18 +597,63 @@ def mapMinimap2Local(fq_fn, ref_fa_fn, region):
             if line[:3] == '@HD':
                 out_sam += sq_headers
             continue
-        # add sam records
-        out_sam.append(line)
+        # for sam records, offset the position
+        line_v = line.split('\t')
+        # fix the chromosome name from chr6:start-pos to chr6
+        line_v[2] = line_v[2].split(':')[0]
+        # update the position, adding the offset
+        pos = int(line_v[3])
+        line_v[3] = str(pos + reg_start_pos - 1)
+        out_sam.append('\t'.join(line_v))
     return out_sam
 
 
-def filterAnnotateSam(sam, sel_sreads, region, out_bam_fn):
-    # prepare the target region
-    region_v = region.split(':')
-    # seqn_t = region_v[0]
-    # add some flanking to rescue reads starting around the target region
-    pos_s_t = int(region_v[1].split('-')[0])
-    # pos_e_t = int(region_v[1].split('-')[1])
+def prepareSQheaders(ref_fa_fn):
+    """Prepare the SQ headers from a FASTA indexed
+
+    Read the FAI index file and use the sequence length to prepare the
+    SQ headers necessary in a proper BAM/SAM.
+
+    Args:
+        ref_fa_fn : path to the reference FASTA file.
+
+    Returns: a list of strings with the SQ headers
+
+    """
+    # SQ records
+    res = []
+    sq = '@SQ\tSN:{}\tLN:{}'
+    # read fai index
+    inf = open(ref_fa_fn + '.fai', 'rt')
+    for line in inf:
+        line = line.rstrip().split('\t')
+        res.append(sq.format(line[0], line[1]))
+    inf.close()
+    # return list of SQ headers
+    return res
+
+
+def annotateSam(sam, sel_sreads, out_bam_fn, verbose=False):
+    """Annotate SAM records for selected subreads
+
+    Add tags with information about the original readn name (*rn*),
+    the predicted haplotype (*hp*) and the predicted module
+    (*md*). All this information is in the sel_sreads argument. Write
+    the annotated SAM records to a sorted and indexed BAM.
+
+    Args:
+        sam : list of SAM records as strings
+        sel_sreads : subreads selection from selectSubreads/selectSubreadsOnDip
+                subread name -> - 'read' name
+                                - 'start' position in read
+                                - 'end' position in read
+                                - 'haplotype' name  (is diplotype info)
+                                - 'module' name  (is diplotype info)
+        out_bam_fn : name for the output BAM file
+        verbose : should log message be displayed?
+
+    Returns: writes a sorted and indexed BAM file
+    """
     # start streaming the SAM and writting it to the temporary file
     temp_sam_fn = out_bam_fn + '.sam'
     sam_f = open(temp_sam_fn, 'wt')
@@ -580,28 +669,13 @@ def filterAnnotateSam(sam, sel_sreads, region, out_bam_fn):
         # parse the SAM record
         line_v = line.split('\t')
         sreadn = line_v[0]
-        # seqn = line_v[2]
-        # fix the chromosome name from chr6:start-pos to chr6
-        seqn = line_v[2].split(':')
-        line_v[2] = seqn[0]
-        # update the position, adding the offset
-        pos = int(line_v[3])
-        line_v[3] = str(pos + pos_s_t - 1)
-        # # change mapping quality and flag
-        # line_v[4] = '60'
-        # line_v[1] = '0'
         # skip if not part of the target reads (shouldn't happen?)
         if sreadn not in sel_sreads:
             continue
-        # skip if already outputed one
+        # skip if already outputed one (also shouldn't happen?)
         # (assuming they're ordered by quality for now)
         if sreadn in sread_done:
             continue
-        # # check if in the target region
-        # if seqn == seqn_t and pos > pos_s_t and pos < pos_e_t:
-        #     sam_f.write('\t'.join(line_v) + '\n')
-        #     # mark this read as done
-        #     sread_done.add(sreadn)
         # add tag with read name
         line_v.append('rn:Z:' + sel_sreads[sreadn]['read'])
         # add other tags, if present
@@ -614,7 +688,7 @@ def filterAnnotateSam(sam, sel_sreads, region, out_bam_fn):
         # mark this read as done
         sread_done.add(sreadn)
     sam_f.close()
-    # convert to BAM
+    # sort and write to BAM
     samtools_cmd = ['samtools', 'sort', '-o', out_bam_fn, temp_sam_fn]
     subprocess.run(samtools_cmd, check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -624,5 +698,7 @@ def filterAnnotateSam(sam, sel_sreads, region, out_bam_fn):
     subprocess.run(samtools_cmd, check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     # log
-    print('{} subreads selected'.format(len(sel_sreads)))
-    print('{} subreads mapped'.format(len(sread_done)))
+    if verbose:
+        print('{} subreads selected -> {} mapped to {}'.format(len(sel_sreads),
+                                                               len(sread_done),
+                                                               out_bam_fn))

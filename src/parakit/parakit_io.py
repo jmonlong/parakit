@@ -809,12 +809,25 @@ def writePathsInfo(paths_res, nodes, stats_fn, info_fn):
 
 
 def readDiplotype(stats_fn, info_fn, verbose=False):
+    """Read the pair of TSV files and load the best diplotype information
+
+    Loads the best diplotype from the results of `parakit diplotype`,
+    i.e. the path taken by the two haplotypes.
+
+    Args:
+        stats_fn : path to the diplotype evaluation stats TSV file (-stats.tsv)
+        info_fn : path to the haplotype information TSV file (-info.tsv)
+        verbose : should some log message be printed?
+
+    Returns: a dict haplotype name -> list of nodes
+    """
     # read the stats file and extract the names of the best diplotype
     hap_names = []
     inf = open(stats_fn, 'rt')
     for line in inf:
         line = line.rstrip().split('\t')
         if line[0] != 'hap1':
+            # keep the first/best diplotype only
             hap_names.append(line[0])
             hap_names.append(line[1])
             break
