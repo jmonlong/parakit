@@ -944,8 +944,9 @@ class Subreads:
             any_inf_nodes = False
             for nod in reads.path[readn]:
                 if nodes[nod]['class'] in ['c1', 'c2']:
-                    any_inf_nodes = True
-                    break
+                    if nod in node_group and node_group[nod] == 'module':
+                        any_inf_nodes = True
+                        break
             if not any_inf_nodes:
                 continue
             # split the reads at node involved in the cycle
@@ -1215,7 +1216,17 @@ class Subreads:
         res = {}
         for hap in best_dip:
             hap = best_dip[hap]
-            hapn = '_'.join([str(hh) for hh in hap])
+            hapn = []
+            for hh in hap:
+                if hh == 'flankl':
+                    hapn.append('l')
+                elif hh == 'flankr':
+                    hapn.append('r')
+                elif hh == 'buffer':
+                    hapn.append('b')
+                else:
+                    hapn.append(str(hh))
+            hapn = '_'.join(hapn)
             path = []
             for mod in hap:
                 if mod == 'flankl':

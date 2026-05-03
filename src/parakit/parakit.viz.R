@@ -253,7 +253,7 @@ if(args$viz$val %in% c('calls', 'all', 'all_small')){
     vars.alt = vars[rep(1:length(reads.alt), unlist(lapply(reads.alt, length))),] %>% dplyr::select(-reads_ref, -reads_alt) %>%
       mutate(read=unlist(reads.alt), allele='alt')
     vars = rbind(vars.ref, vars.alt) %>% mutate(read=gsub('_sr[0-9]+', '', read))
-    vars = vars %>% mutate(variant=ifelse(sig!='None', sig, variant),
+    vars = vars %>% mutate(variant=ifelse(clinsig!='None', clinsig, variant),
                            variant=factor(variant, unique(variant)),
                            allele=factor(allele, c('alt', 'ref', 'NA'))) %>%
       dplyr::rename(varpos=pos)

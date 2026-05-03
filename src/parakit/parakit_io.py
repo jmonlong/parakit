@@ -138,6 +138,15 @@ def parseCs(cs):
 
 
 def parsePath(path):
+    """Parse a path string
+
+    Parse string in the form ">1>4>5<7>9" into a list of list.
+
+    Args:
+        path : path as a string
+
+    Returns: a list with a list of [node, strand)
+    """
     cur_node = ''
     cur_strand = ''
     res = []

@@ -136,6 +136,7 @@ pars_call.add_argument('-a', help='annotation file (e.g. from ClinVar)',
                        default='')
 pars_call.add_argument('-m', help='number of markers checked around the SNPs',
                        default=20, type=int)
+pars_call.add_argument('-s', help='minimum support', default=3, type=int)
 pars_call.add_argument('-o', help='output TSV', required=True)
 pars_call.add_argument('-t', help='debug trace mode', action='store_true')
 pars_call.set_defaults(scmd='call')
@@ -166,6 +167,7 @@ def scmd_call(args):
     pkvar.findVariants(nodes=nodes, annot_fn=clinvar_fn,
                        reads=reads, nmarkers=args.m,
                        pos_offset=pos_offset,
+                       min_support=args.s,
                        output_tsv=args.o, chrom=c1[0])
 
 
@@ -190,9 +192,6 @@ pars_filtercalls.set_defaults(scmd='filtercalls')
 def scmd_filtercalls(args):
     # read config json file
     config = json.load(open(args.j, 'rt'))
-    # get offset from config file
-    c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
-    pos_offset += 1
 
     # load node info
     node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
@@ -261,6 +260,7 @@ pars_annotate.add_argument('-n', help='node information', default='')
 pars_annotate.add_argument('-g', help='input GFA pangenome', default='')
 pars_annotate.add_argument('-f', help='input fasta file', default='')
 pars_annotate.add_argument('-r', help='input alignments in GAF', default='')
+pars_annotate.add_argument('-c', help='calls TSV', default='')
 pars_annotate.add_argument('-p', help='annotate the paths in the GFA',
                            action='store_true')
 pars_annotate.add_argument('-o', help='output PDF file',
@@ -290,7 +290,9 @@ def scmd_annotate(args):
     elif args.r != '':
         print('Using {}. No alignment needed.'.format(args.r))
     elif args.f != '':
-        if os.path.isfile(gaf_fn):
+        if (os.path.isfile(gaf_fn) and
+                (not os.path.isfile(args.f) or
+                 (os.path.getmtime(gaf_fn) > os.path.getmtime(args.f)))):
             print(gaf_fn + ' exists. Skipping alignment to the pangenome')
             args.r = gaf_fn
         else:
@@ -310,24 +312,6 @@ def scmd_annotate(args):
     # update/guess paths before
     args.n = pkio.nodeFile(config, fn=args.n, check_file=True)
     args.e = pkio.geneFile(args.e, config, check_file=True)
-    # if annotation provided, call variants
-    if args.a != '':
-        # get offset from config file
-        c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
-        pos_offset += 1
-        nodes = pkio.readNodeInfo(args.n, verbose=args.t)
-        # update with edge information
-        pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
-        pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=args.t)
-        # read annotation
-        clinvar_fn = pkio.clinvarFile(args.a, config, check_file=True)
-        # read GAF
-        reads = pkio.readGAF(args.r, nodes, verbose=args.t)
-        # variants in reads and write output TSV
-        pkvar.findVariants(nodes=nodes, annot_fn=clinvar_fn,
-                           reads=reads, nmarkers=args.m,
-                           pos_offset=pos_offset, min_support=1,
-                           output_tsv=args.o + '.calls.tsv')
     # run the R script to make the graphs
     pkproc.runRscript(script_path, args)
 
@@ -529,7 +513,8 @@ def scmd_surject(args):
     # try to guess the fastq file?
     if args.f == '':
         fq_fn = args.r + '.fq'
-        if os.path.isfile(fq_fn):
+        if (os.path.isfile(fq_fn) and
+                os.path.getmtime(fq_fn) > os.path.getmtime(args.r)):
             print("Guessing that the fastq is " + fq_fn)
             args.f = fq_fn
         else:

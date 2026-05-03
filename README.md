@@ -11,6 +11,7 @@ It is still in active development, especially to extend this approach to other l
 - [GRCh38+HPRC RCCX pangenome](#GRCh38-HPRC-RCCX-pangenome)
 - [Commands](#commands)
 - [Output](#output)
+- [Visualization in IGV](#Visualization-in-IGV)
 - [Citation](#citation)
 - [FAQ](#FAQ)
 
@@ -182,8 +183,8 @@ To facilitate the visualization of the reads and variant calls, Parakit can proj
 Actually, reads are first split into subreads covering at most one module.
 
 The `surject` subcommand produces an indexed BAM file that can be imported in [IGV](https://igv.org/), or used with variant calling/phasing pipeline to call novel small variants.
-If diplotype files are provided (output of `parakit diplotype`), all subreads will be surjected and tagged with the assigned haplotype (*hp* tag) and module (i.e. haplotype + module number, *md* tag).
-Otherwise, only reads that seem to originate from the *gene* module are surjected to help focus on potential novel small variants in the CYP21A2.
+If diplotype files (output of `parakit diplotype`) are provided, all subreads will be surjected and tagged with the assigned haplotype (*hp* tag) and module (i.e. haplotype + module number, *md* tag).
+Otherwise, only reads that seem to originate from the *gene* module are surjected to help focus on potential novel small variants in *CYP21A2*.
 
 ```sh
 # *gene* subreads only (no tags)
@@ -208,7 +209,11 @@ parakit call -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o calls.tsv
 ```
 
 By loading the surjected BAM and those BED files in IGV, we can investigate the result of the diplotyping and explore potential new variants that were absent from the pangenome. 
+For example, for a simulated test sample, we *grouped* reads by the *md* tag (for module, top-left labels) and *colored* by the *hp* tag (for haplotype) to explore the supporting reads for each reconstructed module in the diplotype:
 
+![](docs/imgs/surject.igv.screenshot.png)
+
+At the bottom, we see the calls predicted by parakit for this sample, and all the variants in the pangenome.
 
 ## Citation
 
