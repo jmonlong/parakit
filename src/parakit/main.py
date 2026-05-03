@@ -6,6 +6,7 @@ import parakit.parakit_variants as pkvar
 import parakit.parakit_path as pkpath
 import parakit.parakit_plot as pkplot
 import parakit.parakit_surject as pksurj
+import parakit.parakit_sim as pksim
 import json
 import os
 
@@ -552,6 +553,62 @@ def scmd_surject(args):
     return (True)
 
 
+# sim subcommand: sim alignments to the linear reference
+pars_sim = spars.add_parser('sim',
+                            help='simulate a diplotype')
+pars_sim.add_argument('-c', required=True, help='input simulation configuration')
+pars_sim.add_argument('-j', help='config JSON file')
+pars_sim.add_argument('-g', help='input GFA pangenome', default='')
+pars_sim.add_argument('-n', help='node information', default='')
+pars_sim.add_argument('-a', help='annotation file (e.g. from ClinVar)',
+                      default='')
+pars_sim.add_argument('-o', help='output fasta file', default='parakit.sim.fa')
+pars_sim.add_argument('-t', help='debug trace mode', action='store_true')
+pars_sim.set_defaults(scmd='sim')
+
+
+def scmd_sim(args):
+    # read config json file
+    config = json.load(open(args.j, 'rt'))
+    # get offset from config file
+    c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
+    pos_offset += 1
+    # load node info
+    node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
+    nodes = pkio.readNodeInfo(node_fn)
+    # read GFA file
+    pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
+    gfa_info = pksim.readGfaForSim(pg_gfa, refname='ref')
+    pkio.updateNodesSucsWithGFA(nodes, pg_gfa, verbose=args.t)
+    # read annotation (optional)
+    clinvar_fn = pkio.clinvarFile(args.a, config)
+    if not os.path.isfile(clinvar_fn):
+        clinvar_fn = None
+    # simulate haplotypes
+    sim_config = json.load(open(args.c, 'rt'))
+    haps = {}
+    for hap_name in sim_config['haplotypes']:
+        hap_conf = sim_config['haplotypes'][hap_name]
+        haps[hap_name] = pksim.simulateHaplotype(hap_conf,
+                                                 nodes, gfa_info,
+                                                 annot_fn=clinvar_fn,
+                                                 pos_offset=pos_offset)
+    # write fasta
+    pkproc.writeFastaMultiSeqs(args.o, haps)
+    # simulate reads too?
+    if 'read_length' in sim_config:
+        fastq_fn = args.o + '.fq'
+        if args.o[-3:] == '.fa':
+            fastq_fn = args.o[:-3] + '.fq'
+        fastq_f = open(fastq_fn, 'wt')
+        for hap_name in haps:
+            pksim.simulateReads(haps[hap_name], fastq_f,
+                                read_len=sim_config['read_length'],
+                                depth=sim_config['haplotype_depth'])
+        fastq_f.close()
+    return (True)
+
+
 def main():
     args = pars.parse_args()
 
@@ -579,3 +636,5 @@ def main():
         scmd_annotate(args)
     elif args.scmd == 'surject':
         scmd_surject(args)
+    elif args.scmd == 'sim':
+        scmd_sim(args)

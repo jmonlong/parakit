@@ -15,6 +15,19 @@ def writeFasta(outfn, seqn, seq, wrap=80):
     faf.close()
 
 
+def writeFastaMultiSeqs(outfn, seqs, wrap=80):
+    faf = open(outfn, 'wt')
+    for seqn in seqs:
+        faf.write('>{}\n'.format(seqn))
+        seq = seqs[seqn]
+        seqii = 0
+        while seqii < len(seq):
+            seqjj = min(len(seq), seqii + wrap)
+            faf.write(seq[seqii:seqjj] + '\n')
+            seqii = seqjj
+    faf.close()
+
+
 def getRegionsFromConfig(config):
     """Extract information about the region of interest from the config file
 
