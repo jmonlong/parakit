@@ -215,6 +215,12 @@ For example, for a simulated test sample, we *grouped* reads by the *md* tag (fo
 
 At the bottom, we see the calls predicted by parakit for this sample, and all the variants in the pangenome.
 
+## Other commands
+
+See the [manual](MANUAL.md) (*in progress*).
+
+- [`parakit sim`](MANUAL.md#parakit-sim) to simulate haplotypes and reads.
+
 ## Citation
 
 For now, please cite [our preprint on medRxiv](https://www.medrxiv.org/content/10.1101/2025.02.07.25321404v1):

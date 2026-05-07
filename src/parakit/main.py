@@ -558,9 +558,9 @@ pars_sim = spars.add_parser('sim',
                             help='simulate a diplotype')
 pars_sim.add_argument('-c', required=True, help='input simulation configuration')
 pars_sim.add_argument('-j', help='config JSON file')
-pars_sim.add_argument('-g', help='input GFA pangenome', default='')
-pars_sim.add_argument('-n', help='node information', default='')
-pars_sim.add_argument('-a', help='annotation file (e.g. from ClinVar)',
+pars_sim.add_argument('-g', help='input GFA pangenome (optional)', default='')
+pars_sim.add_argument('-n', help='node information (optional)', default='')
+pars_sim.add_argument('-a', help='annotation file (e.g. from ClinVar) (optional)',
                       default='')
 pars_sim.add_argument('-o', help='output fasta file', default='parakit.sim.fa')
 pars_sim.add_argument('-t', help='debug trace mode', action='store_true')
