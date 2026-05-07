@@ -1,0 +1,17 @@
+{"haplotypes": 
+ {
+   "tsamp1_1": [
+     {"start_mod": "c1", "mod_noise": 0.05},
+     {"start_mod": "c2", "mod_noise": 0.01},
+     {"start_mod": "c2", "mod_noise": 0.05,
+      "alt_paths": {"8547": "8547_8548_8550",
+                    "8664": "8664_8666_8667"}}
+   ],
+   "tsamp1_2": [
+     {"start_mod": "c1", "mod_noise": 0.05},
+     {"start_mod": "c1", "mod_noise": 0.05, "fusions": ["8333"]}
+   ]
+ },
+ "read_length": [20000, 30000],
+ "haplotype_depth": 10
+}  
