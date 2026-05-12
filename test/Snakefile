@@ -1,0 +1,121 @@
+if 'sample' not in config:
+    config['sample'] = 'tsamp1'
+if ',' in config['sample']:
+    config['sample'] = config['sample'].split(',')
+
+if 'parakit_config' not in config:
+    config['parakit_config'] = 'rccx.grch38_hprc2.mcc.config.json'
+
+LABEL = config['parakit_config'].replace('.config.json', '')
+
+rule main:
+    input:
+        annotate_pdf=expand('{sample}/{sample}.sim.dip_annotated.pdf', sample=config['sample']),
+        pdf=expand('{sample}/{sample}.sim.all_small.pdf', sample=config['sample']),
+        bam=expand("{sample}/{sample}.sim.parakit_surjected_diplotype.bam", sample=config['sample']),
+
+rule deconstruct:
+    input: config['parakit_config']
+    output: LABEL + '.decon.tsv'
+    shell:
+        """
+        parakit deconstruct -j {input} -o {output}
+        """
+
+rule simulate:
+    input:
+        conf=config['parakit_config'],
+        samp_conf='sim.config.{sample}.json'
+    output:
+        fa='{sample}/{sample}.sim.fa',
+        fq='{sample}/{sample}.sim.fq'
+    shell:
+        """
+        parakit sim -j {input.conf} -c {input.samp_conf} -o {output.fa}
+        """
+
+rule annotate_simulated_hap:
+    input:
+        conf=config['parakit_config'],
+        fa='{sample}/{sample}.sim.fa'
+    output: '{sample}/{sample}.sim.dip_annotated.pdf'
+    shell:
+        """
+        parakit annotate  -j {input.conf} -f {input.fa} -o {output}
+        """
+
+rule map_reads:
+    input:
+        conf=config['parakit_config'],
+        fq='{sample}/{sample}.sim.fq'
+    output:
+        gaf='{sample}/{sample}.sim.gaf.gz',
+        stats='{sample}/{sample}.sim.gafstats.txt'
+    shell:
+        """
+        parakit map -j {input.conf} -b {input.fq} -o {output.gaf}
+        parakit gafstats -j {input.conf} -r {output.gaf} > {output.stats}
+        """
+
+rule call:
+    input:
+        conf=config['parakit_config'],
+        gaf='{sample}/{sample}.sim.gaf.gz'
+    output:
+        calls='{sample}/{sample}.sim.calls.tsv',
+        filt='{sample}/{sample}.sim.filtered_calls.tsv'
+    shell:
+        """
+        parakit call -j {input.conf} -r {input.gaf} -o {output.calls}
+        parakit filtercalls -j {input.conf} -c {output.calls} -af -o {output.filt}
+        """
+
+rule estimate_copy:
+    input:
+        conf=config['parakit_config'],
+        gaf='{sample}/{sample}.sim.gaf.gz'
+    output: '{sample}/{sample}.sim.copy.tsv'
+    shell:
+        """
+        parakit copy -j {input.conf} -r {input.gaf} -o {output}
+        """
+
+rule diplotype:
+    input:
+        conf=config['parakit_config'],
+        gaf='{sample}/{sample}.sim.gaf.gz'
+    output:
+        info='{sample}/{sample}.sim.diplotype.paths-info.tsv',
+        stats='{sample}/{sample}.sim.diplotype.paths-stats.tsv'
+    params:
+        opref='{sample}/{sample}.sim.diplotype'
+    shell:
+        """
+        parakit diplotype -j {input.conf} -r {input.gaf} -o {params.opref}
+        """
+
+rule viz:
+    input:
+        conf=config['parakit_config'],
+        gaf='{sample}/{sample}.sim.gaf.gz',
+        calls='{sample}/{sample}.sim.filtered_calls.tsv',
+        haps='{sample}/{sample}.sim.diplotype.paths-info.tsv',
+        dips='{sample}/{sample}.sim.diplotype.paths-stats.tsv'
+    output: '{sample}/{sample}.sim.all_small.pdf'
+    shell:
+        """
+        parakit viz -v all_small -j {input.conf} -r {input.gaf} -c {input.calls} -m 1 -d {input.dips} -p {input.haps} -o {output}
+        """
+
+rule surject:
+    input:
+        conf=config['parakit_config'],
+        gaf='{sample}/{sample}.sim.gaf.gz',
+        fq='{sample}/{sample}.sim.fq',
+        haps='{sample}/{sample}.sim.diplotype.paths-info.tsv',
+        dips='{sample}/{sample}.sim.diplotype.paths-stats.tsv'
+    output: "{sample}/{sample}.sim.parakit_surjected_diplotype.bam"
+    shell:
+        """
+        parakit surject -j {input.conf} -r {input.gaf} -f {input.fq} -d {input.dips} -p {input.haps} -o {output}
+        """
