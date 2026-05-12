@@ -1,4 +1,6 @@
 import statistics
+import pyfaidx
+import parakit.parakit_process as pkproc
 
 
 class Variant:
@@ -25,6 +27,7 @@ class Variant:
         addAltRead : Add a read supporting the alternate allele
         toTsv : String representation for a TSV output
         toBed : String representation for a BED output
+        toVcf : String representation for a VCF output
         toReadTsv : String representation for the per-read TSV output
         assignCopy : Place the variant on the module/copy c1 or c2
         findRefTraversal : Find the reference traversal in the pangenome
@@ -86,6 +89,67 @@ class Variant:
         res_r = fmt.format(self.getVariantID(), pos, end, self.alt_trav[0],
                            ref_trav, self.ref_seq, '_'.join(self.alt_trav),
                            self.alt_seq, self.copy, self.clinvar)
+        res += res_r
+        return (res)
+
+    def toVcf(self, chrom, ref_fa, include_headers=False):
+        """String representation for a VCF output"""
+        res = ""
+        # potentially include the header
+        if include_headers:
+            res = """##fileformat=VCFv4.2
+##source=Parakit
+##contig=<ID={},length={}>
+##INFO=<ID=RREF,Number=1,Type=Integer,Description="Number of reads supporting the reference allele">
+##INFO=<ID=RALT,Number=1,Type=Integer,Description="Number of reads supporting the alternate allele">
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position for a fusion/deletion">
+##INFO=<ID=CLIN,Number=1,Type=String,Description="ClinVar summary">
+##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">
+##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE
+"""
+            res = res.format(chrom, len(ref_fa[chrom]))
+        # prepare the variant's relevant info
+        pos = self.pos if self.pos != 0 else 'NA'
+        ref = self.ref_seq
+        alt = self.alt_seq
+        gt = '0/1'
+        # check if we need to add some padding or fix some seq issues
+        ref_base = str(ref_fa[chrom][pos - 1])
+        if len(self.ref_seq) == 0 or ref_base != self.ref_seq[0]:
+            if self.end is None and (len(ref) == 0 or len(alt) == 0):
+                # add padding base
+                pos += -1
+                pad_base = str(ref_fa[chrom][pos - 1])
+                ref = pad_base + ref
+                alt = pad_base + alt
+            elif ref_base == self.alt_seq:
+                # catch when allele in the ref genome is rare and not
+                # the "reference" allele in the pangenome switch ref
+                # and alt ?
+                ref = self.alt_seq
+                alt = self.ref_seq
+                gt = '0/0'
+        # INFOs
+        infos = []
+        if self.end is not None:
+            infos.append('SVTYPE=DEL')
+            infos.append('END={}'.format(self.end))
+            infos.append('SVLEN={}'.format(self.end - pos + 1))
+            ref = ref[0]
+            alt = '<DEL>'
+            pos += 1
+        if self.clinvar is not None:
+            infos.append('CLIN={}'.format(self.clinvar))
+        infos.append('RREF={}'.format(len(self.reads_ref)))
+        infos.append('RALT={}'.format(len(self.reads_alt)))
+        # prepare VCF record
+        res_r = "{}\t{}\t{}".format(chrom, pos, self.getVariantID())
+        res_r += "\t{}\t{}\t30\tPASS\t{}".format(ref, alt, ';'.join(infos))
+        # genotype, for now just unphased het.
+        # How should we encode the genotype when the number of module can vary so much?
+        res_r += "\tGT\t" + gt
         res += res_r
         return (res)
 
@@ -221,11 +285,19 @@ class Variant:
             print("Warning: Overwriting reference sequence for variant " +
                   self.getVariantID())
         if self.ref_trav is not None:
-            self.ref_seq = ''
+            ref_seq = ''
             if len(self.ref_trav) > 0:
-                # use the first reference traversal
-                for node in self.ref_trav[0][1:-1]:
-                    self.ref_seq += nodes[node]['seq']
+                # use the first reference traversal with the all ref nodes
+                for ref_trav in self.ref_trav:
+                    all_ref_nodes = True
+                    ref_seq = ''
+                    for node in ref_trav[1:-1]:
+                        ref_seq += nodes[node]['seq']
+                        if nodes[node]['ref'] == 0:
+                            all_ref_nodes = False
+                    if all_ref_nodes:
+                        break
+            self.ref_seq = ref_seq
 
     def findAltSequence(self, nodes):
         """Find the sequence of the alternate allele"""
@@ -266,6 +338,8 @@ class Variant:
             self.end = round((u1 + d1) / 2)
         # error in position is always the same no matter the configuration
         self.pos_error = round((abs(u1 - d1) + abs(u2 - d2)) / 4)
+        # get some reference sequence
+        self.ref_seq = nodes[self.alt_trav[0]]['seq']
 
     def offsetPosition(self, offset):
         """Add an offset to the start and end positions"""
@@ -596,8 +670,8 @@ class ConvertedVariants:
             self.variants[varid].offsetPosition(offset)
 
 
-def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
-                 min_support=3, output_tsv='calls.tsv', chrom='chr6'):
+def findVariants(nodes, annot_fn, reads, config, nmarkers=10,
+                 min_support=3, output_tsv='calls.tsv'):
     """Call variants from aligned reads
 
     Identify variants in the pangenome, match with an annotation file,
@@ -616,6 +690,11 @@ def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
 
     Returns: write a TSV and BED file with variant information
     """
+    # get offset from config file
+    c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
+    pos_offset += 1
+    chrom = c1[0]
+
     # look for read support for variant edges in vedges
     vars = ConvertedVariants(nmarkers)
     vars.decomposePangenome(nodes)
@@ -641,6 +720,9 @@ def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
     # sort them by position
     var_ids = sorted(list(all_vars), key=lambda vid: all_vars[vid].pos)
 
+    # load the reference Fasta, necessary for the VCF output...
+    ref_fa = pyfaidx.Fasta(config['ref_fa'])
+    
     # write TSV output
     print('Writing full summary in ' + output_tsv + '...')
     with open(output_tsv, 'wt') as outf:
@@ -658,6 +740,19 @@ def findVariants(nodes, annot_fn, reads, nmarkers=10, pos_offset=0,
     with open(output_bed, 'wt') as outf:
         for vid in var_ids:
             outf.write(all_vars[vid].toBed(chrom=chrom) + '\n')
+
+    # write VCF output
+    # output VCF file, remove .tsv extension is present
+    output_vcf = output_tsv + '.vcf'
+    if output_tsv.endswith('.tsv'):
+        output_vcf = output_tsv[:-3] + 'vcf'
+    print('Writing VCF summary in ' + output_vcf + '...')
+    with open(output_vcf, 'wt') as outf:
+        inc_headers = True
+        for vid in var_ids:
+            outf.write(all_vars[vid].toVcf(chrom=chrom, ref_fa=ref_fa,
+                                           include_headers=inc_headers) + '\n')
+            inc_headers = False
 
 
 def readVariantCalls(filen):

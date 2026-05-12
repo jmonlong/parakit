@@ -146,9 +146,6 @@ pars_call.set_defaults(scmd='call')
 def scmd_call(args):
     # read config json file
     config = json.load(open(args.j, 'rt'))
-    # get offset from config file
-    c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
-    pos_offset += 1
 
     # load node info
     node_fn = pkio.nodeFile(config, fn=args.n, check_file=True)
@@ -166,10 +163,11 @@ def scmd_call(args):
 
     # find variants in reads and write output TSV
     pkvar.findVariants(nodes=nodes, annot_fn=clinvar_fn,
-                       reads=reads, nmarkers=args.m,
-                       pos_offset=pos_offset,
+                       reads=reads,
+                       config=config,
+                       nmarkers=args.m,
                        min_support=args.s,
-                       output_tsv=args.o, chrom=c1[0])
+                       output_tsv=args.o)
 
 
 # call subcommand: calls variant by aggregating read support

@@ -41,7 +41,7 @@ The following samples are simulated:
 source ../env_parakit/bin/activate
 
 ## run one sample (tsamp1)
-snakemake --config sample=tsamp1,tsamp2,tsamp3 --cores 8 -p
+snakemake --cores 8 -p
 
 ## run all samples
 snakemake --config sample=tsamp1,tsamp2,tsamp3 --cores 8 -p
