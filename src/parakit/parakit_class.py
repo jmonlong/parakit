@@ -116,7 +116,6 @@ class Reads:
         getReadPos :
         getReadPosList :
         getAllReadPosList :
-        predictLocalCopy :
         print :
         listSuccessors :
         overlapWithPath :
@@ -221,47 +220,6 @@ class Reads:
                 rp.addReadPosList(self.edge_to_readpos[ename])
             return (rp)
 
-    def predictLocalCopy(self, read_name, var_pos, nodes, nmarkers):
-        read = self.path[read_name]
-        # check X markers downstream
-        c2_marks_d = 0
-        c1_marks_d = 0
-        nmarks = 0
-        pos = var_pos + 1
-        while nmarks < nmarkers / 2 and pos < len(read):
-            if nodes[read[pos]]['class'] == 'c1':
-                c1_marks_d += 1
-                nmarks += 1
-            elif nodes[read[pos]]['class'] == 'c2':
-                c2_marks_d += 1
-                nmarks += 1
-            pos += 1
-        # check X markers upstream
-        c2_marks_u = 0
-        c1_marks_u = 0
-        nmarks = 0
-        pos = var_pos - 1
-        while nmarks < nmarkers / 2 and pos >= 0:
-            if nodes[read[pos]]['class'] == 'c1':
-                c1_marks_u += 1
-                nmarks += 1
-            elif nodes[read[pos]]['class'] == 'c2':
-                c2_marks_u += 1
-                nmarks += 1
-            pos += -1
-        c1_marks = c1_marks_d + c1_marks_u
-        c2_marks = c2_marks_d + c2_marks_u
-        if c2_marks > 3 * c1_marks:
-            return ('c2')
-        elif c2_marks_d > 3 * c1_marks_d:
-            return ('c2')
-        elif c2_marks_u > 3 * c1_marks_u:
-            return ('c2')
-        elif c1_marks > 3 * c2_marks:
-            return ('c1')
-        else:
-            return (None)
-
     def print(self):
         nedge = 0
         nreads = {}
@@ -286,3 +244,11 @@ class Reads:
                 if self.nsuc[node_name][snod] >= min_read_support:
                     sucs_l.append(snod)
         return (sucs_l)
+
+
+# for now more of a minimal placeholder class to work as input to
+# splitReads (Subreads object)
+class Haplotypes:
+    def __init__(self, haps):
+        self.path = haps
+        self.read_len = {}

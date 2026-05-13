@@ -937,8 +937,9 @@ class Subreads:
             node = nnode
         # process each read
         for readn in reads.path:
-            # skip is read is too short
-            if reads.read_len[readn] < min_read_len:
+            # skip if read is too short
+            if (readn in reads.read_len
+                    and reads.read_len[readn] < min_read_len):
                 continue
             # skip if read with no informative nodes
             any_inf_nodes = False
@@ -1239,6 +1240,49 @@ class Subreads:
                     path += cl_paths[mod]
             res[hapn] = path
         return res
+
+    def predictLocalCopy(self, sread_name, var_pos, nodes, nmarkers):
+        """Guess if a variant position is within a c1 or c2 copy"""
+        read = self.sreads[sread_name].path
+        # check X markers downstream
+        c2_marks_d = 0
+        c1_marks_d = 0
+        nmarks = 0
+        pos = var_pos + 1
+        while nmarks < nmarkers / 2 and pos < len(read):
+            if nodes[read[pos]]['class'] == 'c1':
+                c1_marks_d += 1
+                nmarks += 1
+            elif nodes[read[pos]]['class'] == 'c2':
+                c2_marks_d += 1
+                nmarks += 1
+            pos += 1
+        # check X markers upstream
+        c2_marks_u = 0
+        c1_marks_u = 0
+        nmarks = 0
+        pos = var_pos - 1
+        while nmarks < nmarkers / 2 and pos >= 0:
+            if nodes[read[pos]]['class'] == 'c1':
+                c1_marks_u += 1
+                nmarks += 1
+            elif nodes[read[pos]]['class'] == 'c2':
+                c2_marks_u += 1
+                nmarks += 1
+            pos += -1
+        c1_marks = c1_marks_d + c1_marks_u
+        c2_marks = c2_marks_d + c2_marks_u
+        if c2_marks > 3 * c1_marks:
+            return ('c2')
+        elif c2_marks_d > 3 * c1_marks_d:
+            return ('c2')
+        elif c2_marks_u > 3 * c1_marks_u:
+            return ('c2')
+        elif c1_marks > 3 * c2_marks:
+            return ('c1')
+        else:
+            return (None)
+
 
 
 def makeFlankConsensus(nodes, flank_type='flankl'):

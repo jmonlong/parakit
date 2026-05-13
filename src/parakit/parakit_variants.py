@@ -1,6 +1,8 @@
 import statistics
 import pyfaidx
 import parakit.parakit_process as pkproc
+import parakit.parakit_path as pkpath
+import parakit.parakit_class as pkclass
 
 
 class Variant:
@@ -48,6 +50,8 @@ class Variant:
         self.alt_seq = alt_seq
         self.reads_ref = set()
         self.reads_alt = set()
+        self.haps_ref = set()
+        self.haps_alt = set()
         self.pos = 0
         self.end = None
         self.pos_error = None
@@ -63,8 +67,19 @@ class Variant:
         """Add a read supporting the alternate allele"""
         self.reads_alt.add(readn)
 
+    def addRefHap(self, hapn):
+        """Add a haplotype supporting the reference allele"""
+        self.haps_ref.add(hapn)
+
+    def addAltHap(self, hapn):
+        """Add a haplotype supporting the alternate allele"""
+        self.haps_alt.add(hapn)
+
     def nAltReads(self):
         return (len(self.reads_alt))
+
+    def nAltHaps(self):
+        return (len(self.haps_alt))
 
     def getEnd(self):
         if self.end is not None:
@@ -184,7 +199,7 @@ class Variant:
         # potentially include the header
         headers = ['variant', 'pos', 'end', 'node', 'clinsig', 'copy',
                    'fusion_start_node', 'pos_ci', 'supp_reads',
-                   'reads_alt', 'reads_ref']
+                   'reads_alt', 'reads_ref', 'haps_alt', 'haps_ref']
         if include_headers:
             res = '\t'.join(headers) + "\n"
         # prepare one row per read
@@ -194,15 +209,24 @@ class Variant:
         node = self.alt_trav[1] if len(self.alt_trav) > 1 else self.alt_trav[0]
         node_fstart = self.alt_trav[0] if self.pos_error is not None else 'NA'
         pos_ci = self.pos_error if self.pos_error is not None else 'NA'
+        # read support
         reads_ref = ','.join(list(self.reads_ref))
         if reads_ref == '':
             reads_ref = 'NA'
         reads_alt = ','.join(list(self.reads_alt))
         if reads_alt == '':
             reads_alt = 'NA'
+        # haplotype support
+        haps_ref = ','.join(list(self.haps_ref))
+        if haps_ref == '':
+            haps_ref = 'NA'
+        haps_alt = ','.join(list(self.haps_alt))
+        if haps_alt == '':
+            haps_alt = 'NA'
         res_r = fmt.format(self.getVariantID(), pos, end, node,
                            self.clinvar, self.copy, node_fstart, pos_ci,
-                           len(self.reads_alt), reads_alt, reads_ref)
+                           len(self.reads_alt), reads_alt, reads_ref,
+                           haps_alt, haps_ref)
         res += res_r
         return (res)
 
@@ -359,41 +383,34 @@ class Fusions:
         self.variants = {}
         # number of markers used to decide if a variant is (likely) converted
         self.nmarkers = nmarkers
+        # TODO remember neighbors for each candidate breakpoint to
+        # help keep the strongest one in the cluster
+        self.neighbors = {}
 
-    def importReads(self, reads, nodes, support_only=False):
-        """Process a set of reads and extract markers split by subread"""
-        # find cycling nodes to split into subreads
-        cyc_nodes = set()
-        for node in nodes:
-            if 'cyc' in nodes[node]['class']:
-                cyc_nodes.add(node)
-        # import each read
-        for readn in reads.path:
-            path = reads.path[readn]
+    def importSubreads(self, sreads, nodes,
+                       support_only=False, is_haplotype=False):
+        """Process a set of subreads and extract markers"""
+        # loop over each subread
+        for sr in sreads.sreads:
+            path = sreads.sreads[sr].path
             # extract marker sequence for each subread
-            cur_markers = []
-            cur_nodes = []
-            subread_cpt = 0
-            for nii, node in enumerate(path):
-                # have we reached the end (of the module or the read)?
-                if (node in cyc_nodes or nii == len(path) - 1):
-                    # then do we have enough markers?
-                    if len(cur_nodes) > 2 * self.nmarkers:
-                        # yes, save current subread
-                        sreadn = readn + '_sr' + str(subread_cpt)
-                        subread_cpt += 1
-                        self.importSubread(cur_markers, cur_nodes, sreadn,
-                                           support_only=support_only)
-                    # start a new set of markers/nodes
-                    cur_markers = []
-                    cur_nodes = []
-                elif nodes[node]['class'] in ['c1', 'c2']:
+            sr_markers = []
+            sr_nodes = []
+            for node in path:
+                if nodes[node]['class'] in ['c1', 'c2']:
                     # this is a marker to record
-                    cur_markers.append(nodes[node]['class'])
-                    cur_nodes.append(node)
+                    sr_markers.append(nodes[node]['class'])
+                    sr_nodes.append(node)
+            # don't consider subreads if not enough markers
+            if len(sr_nodes) > 2 * self.nmarkers:
+                self.importSubread(sr_markers, sr_nodes, sr,
+                                   support_only=support_only,
+                                   is_haplotype=is_haplotype)
 
-    def importSubread(self, markers, nodes, sreadn, support_only=False):
+    def importSubread(self, markers, nodes, sreadn,
+                      support_only=False, is_haplotype=False):
         """Process a set of markers for a subread"""
+        # TODO record the neighbors in this function
         u_c1 = 0
         u_c2 = 0
         d_c1 = markers.count('c1')
@@ -435,40 +452,62 @@ class Fusions:
                 # annotate support only
                 if fusid in self.variants:
                     if fusion_signal:
-                        self.variants[fusid].addAltRead(sreadn)
+                        if is_haplotype:
+                            self.variants[fusid].addAltHap(sreadn)
+                        else:
+                            self.variants[fusid].addAltRead(sreadn)
                     elif self.variants[fusid].copy == fusion_start_copy:
-                        self.variants[fusid].addRefRead(sreadn)
+                        if is_haplotype:
+                            self.variants[fusid].addRefHap(sreadn)
+                        else:
+                            self.variants[fusid].addRefRead(sreadn)
                 # also annotate reference reads on the other copy?
                 other_c = 'c1' if fusion_start_copy == 'c2' else 'c2'
                 fusid2 = 'fus_{}_{}'.format(other_c, nodes[idx])
                 if fusid2 in self.variants and not fusion_signal:
-                    self.variants[fusid2].addRefRead(sreadn)
-            if not support_only and fusion_signal:
+                    if is_haplotype:
+                        self.variants[fusid2].addRefHap(sreadn)
+                    else:
+                        self.variants[fusid2].addRefRead(sreadn)
+            elif fusion_signal:
                 # looking for new fusion, potentially create a variant
                 if fusid not in self.variants:
                     self.variants[fusid] = Variant(alt_trav=[nodes[idx],
                                                              nodes[idx+1]],
                                                    varid=fusid)
                     self.variants[fusid].copy = fusion_start_copy
-                self.variants[fusid].addAltRead(sreadn)
+                if is_haplotype:
+                    self.variants[fusid].addAltHap(sreadn)
+                else:
+                    self.variants[fusid].addAltRead(sreadn)
 
     def filterVariants(self, min_support=3):
         selected_vars = {}
         # sort by the most supporting reads
-        vars_s = sorted(list(self.variants.keys()),
-                        key=lambda vv: -self.variants[vv].nAltReads())
+        vars_s = sorted(list(self.variants.keys()), reverse=True,
+                        key=lambda vv: (self.variants[vv].nAltReads()
+                                        + min_support * self.variants[vv].nAltHaps()))
         used_reads = set()
+        used_haps = set()
+        # TODO issue with this approach is that reads/haps can only support one fusion breakpoint
         # assign some (sub)reads
         for varid in vars_s:
             supp_reads = set()
+            supp_haps = set()
             for readn in self.variants[varid].reads_alt:
                 if readn not in used_reads:
                     supp_reads.add(readn)
-            if len(supp_reads) >= min_support:
+            for hapn in self.variants[varid].haps_alt:
+                if hapn not in used_haps:
+                    supp_haps.add(hapn)
+            if len(supp_reads) + min_support * len(supp_haps) >= min_support:
                 selected_vars[varid] = self.variants[varid]
                 selected_vars[varid].reads_alt = supp_reads
                 for readn in supp_reads:
                     used_reads.add(readn)
+                selected_vars[varid].haps_alt = supp_haps
+                for hapn in supp_haps:
+                    used_haps.add(hapn)
         self.variants = selected_vars
 
     def fillInfo(self, nodes):
@@ -599,10 +638,11 @@ class ConvertedVariants:
         if verbose:
             print('{} annotated variants matched.'.format(n_matched))
 
-    def importReads(self, reads, nodes):
+    def importSubreads(self, sreads, nodes, is_haplotype=False):
         """Tally evidence for each variants across a set of reads"""
-        for readn in reads.path:
-            path = reads.path[readn]
+        # loop over each subread
+        for sr in sreads.sreads:
+            path = sreads.sreads[sr].path
             # save which variants edges are taken by this read
             for pos, node in enumerate(path):
                 if pos == len(path) - 1:
@@ -613,9 +653,9 @@ class ConvertedVariants:
                     # no variant starts at this node, skip
                     continue
                 # check if this region could be converted
-                reg_copy = reads.predictLocalCopy(readn, pos + 1,
-                                                  nodes,
-                                                  self.nmarkers)
+                reg_copy = sreads.predictLocalCopy(sr, pos + 1,
+                                                   nodes,
+                                                   self.nmarkers)
                 if reg_copy is None:
                     # we somehow can't tell if we're in c1 or c2
                     continue
@@ -624,9 +664,10 @@ class ConvertedVariants:
                     # check that it's the appropriate conversion
                     if reg_copy != self.variants[varid].copy:
                         continue
-                    self.checkReadSupport(varid, path[pos:], readn)
+                    self.checkReadSupport(varid, path[pos:], sr,
+                                          is_haplotype=is_haplotype)
 
-    def checkReadSupport(self, varid, read, readn):
+    def checkReadSupport(self, varid, read, readn, is_haplotype=False):
         """Helper function to update read support for a variant"""
         var = self.variants[varid]
         # assign to alt allele if first edge matches
@@ -652,15 +693,22 @@ class ConvertedVariants:
                 break
         # assign if unambiguous
         if alt_support and not ref_support:
-            var.addAltRead(readn)
+            if is_haplotype:
+                var.addAltHap(readn)
+            else:
+                var.addAltRead(readn)
         elif ref_support and not alt_support:
-            var.addRefRead(readn)
+            if is_haplotype:
+                var.addRefHap(readn)
+            else:
+                var.addRefRead(readn)
 
     def filterVariants(self, min_support=3):
         """Keep only variants with a minimum read support"""
         selected_vars = {}
         for varid in self.variants:
-            if self.variants[varid].nAltReads() >= min_support:
+            if (self.variants[varid].nAltReads() >= min_support
+                    or self.variants[varid].nAltHaps() > 0):
                 selected_vars[varid] = self.variants[varid]
         self.variants = selected_vars
 
@@ -670,44 +718,61 @@ class ConvertedVariants:
             self.variants[varid].offsetPosition(offset)
 
 
-def findVariants(nodes, annot_fn, reads, config, nmarkers=10,
-                 min_support=3, output_tsv='calls.tsv'):
-    """Call variants from aligned reads
+def findVariants(nodes, annot_fn, config,
+                 reads=None, haps=None,
+                 nmarkers=10, min_support=3):
+    """Call variants from aligned reads or haplotypes
 
     Identify variants in the pangenome, match with an annotation file,
-    then look for gene-converted or fusion variants. Reports the
-    called variants in a TSV and BED files.
+    then look for gene-converted or fusion variants.
 
     Args:
         nodes : dict with node information
         annot_fn : path to the annotation file
         reads : a Reads object, e.g. read by readGAF
+        haps : a pair of haplotype paths
+        config : config for this pangenome (read from the JSON file)
         nmarkers : how many markers to use for calling and copy assignment
-        pos_offset : how much to offset the reported positions
         min_support : minimum read support to report a variant
-        output_tsv : file name for the output TSV
-        chrom : chromosome name for the output BED file
 
     Returns: write a TSV and BED file with variant information
     """
     # get offset from config file
     c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
     pos_offset += 1
-    chrom = c1[0]
+
+    # prepare subreads
+    sreads = None
+    if reads is not None:
+        sreads = pkpath.Subreads()
+        sreads.splitReads(reads, nodes)
+
+    # split the haplotypes
+    shaps = None
+    if haps is not None:
+        shaps = pkpath.Subreads()
+        haps = pkclass.Haplotypes(haps)
+        shaps.splitReads(haps, nodes)
 
     # look for read support for variant edges in vedges
     vars = ConvertedVariants(nmarkers)
     vars.decomposePangenome(nodes)
     vars.matchAnnotation(annot_fn, pos_offset, verbose=True)
-    vars.importReads(reads, nodes)
+    if sreads is not None:
+        vars.importSubreads(sreads, nodes)
+    if shaps is not None:
+        vars.importSubreads(shaps, nodes, is_haplotype=True)
     vars.filterVariants(min_support)
     vars.offsetPositions(pos_offset)
 
     # look for deletions/fusions
-    print('Looking for deletion/fusion variants...')
     fusions = Fusions()
-    fusions.importReads(reads, nodes)
-    fusions.importReads(reads, nodes, support_only=True)
+    if sreads is not None:
+        fusions.importSubreads(sreads, nodes)
+        fusions.importSubreads(sreads, nodes, support_only=True)
+    if shaps is not None:
+        fusions.importSubreads(shaps, nodes, is_haplotype=True)
+        fusions.importSubreads(shaps, nodes, support_only=True, is_haplotype=True)
     fusions.filterVariants(min_support)
     fusions.fillInfo(nodes)
     fusions.offsetPositions(pos_offset)
@@ -717,12 +782,27 @@ def findVariants(nodes, annot_fn, reads, config, nmarkers=10,
     for varid in fusions.variants:
         all_vars[varid] = fusions.variants[varid]
 
+    return all_vars
+
+
+def writeVariants(all_vars, config, output_tsv='calls.tsv'):
+    """Write called variants to TSV/BED/VCF files
+
+    Args:
+        all_vars : dict with called variants (from findVariants*)
+        config : config for this pangenome (read from the JSON file)
+        output_tsv : file name for the output TSV
+
+    Returns: write a TSV, BED, and VCF files with variant information
+    """
+    c1, c2, pos_offset, reg_e = pkproc.getRegionsFromConfig(config)
+    chrom = c1[0]
     # sort them by position
     var_ids = sorted(list(all_vars), key=lambda vid: all_vars[vid].pos)
 
     # load the reference Fasta, necessary for the VCF output...
     ref_fa = pyfaidx.Fasta(config['ref_fa'])
-    
+
     # write TSV output
     print('Writing full summary in ' + output_tsv + '...')
     with open(output_tsv, 'wt') as outf:

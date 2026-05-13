@@ -131,7 +131,12 @@ pars_call = spars.add_parser('call',
                              help='call variants by aggregating read support')
 pars_call.add_argument('-j', help='config JSON file', required=True)
 pars_call.add_argument('-n', help='node information', default='')
-pars_call.add_argument('-r', help='input alignments in GAF', required=True)
+pars_call.add_argument('-r', help='(optional) input alignments in GAF',
+                       default='')
+pars_call.add_argument('-d', help='(optional) diplotype paths, sorted',
+                       default='')
+pars_call.add_argument('-p', help='(optional) haplotype paths information',
+                       default='')
 pars_call.add_argument('-g', help='input GFA pangenome', default='')
 pars_call.add_argument('-a', help='annotation file (e.g. from ClinVar)',
                        default='')
@@ -158,16 +163,28 @@ def scmd_call(args):
     # read annotation
     clinvar_fn = pkio.clinvarFile(args.a, config, check_file=True)
 
+    # check arguments
+    if args.r != '' and args.d != '' and args.p != '':
+        print('Error: at least one of reads (-r) or diplotypes '
+              '(-p and -d) should be provided.')
+        exit(1)
     # read GAF
-    reads = pkio.readGAF(args.r, nodes, verbose=args.t)
+    reads = None
+    if args.r != '':
+        reads = pkio.readGAF(args.r, nodes, verbose=args.t)
+    # read diplotype
+    dip_paths = None
+    if args.d != '' and args.p != '':
+        dip_paths = pkio.readDiplotype(args.d, args.p, verbose=True)
 
     # find variants in reads and write output TSV
-    pkvar.findVariants(nodes=nodes, annot_fn=clinvar_fn,
-                       reads=reads,
-                       config=config,
-                       nmarkers=args.m,
-                       min_support=args.s,
-                       output_tsv=args.o)
+    vars = pkvar.findVariants(nodes=nodes, annot_fn=clinvar_fn,
+                              reads=reads, haps=dip_paths,
+                              config=config,
+                              nmarkers=args.m,
+                              min_support=args.s)
+
+    pkvar.writeVariants(vars, config=config, output_tsv=args.o)
 
 
 # call subcommand: calls variant by aggregating read support
