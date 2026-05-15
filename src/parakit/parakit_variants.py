@@ -884,6 +884,15 @@ def readVariantCalls(filen):
         if reads_alt != 'NA':
             for readn in reads_alt.split(','):
                 variants[varid].addAltRead(readn)
+        # update haplotype support
+        haps_ref = line[heads.index('haps_ref')]
+        if haps_ref != 'NA':
+            for hapn in haps_ref.split(','):
+                variants[varid].addRefHap(hapn)
+        haps_alt = line[heads.index('haps_alt')]
+        if haps_alt != 'NA':
+            for hapn in haps_alt.split(','):
+                variants[varid].addAltHap(hapn)
     inf.close()
     print('Read {} variants.'.format(len(variants)))
     return (variants)

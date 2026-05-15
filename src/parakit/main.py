@@ -164,7 +164,7 @@ def scmd_call(args):
     clinvar_fn = pkio.clinvarFile(args.a, config, check_file=True)
 
     # check arguments
-    if args.r != '' and args.d != '' and args.p != '':
+    if args.r == '' and args.d == '' and args.p == '':
         print('Error: at least one of reads (-r) or diplotypes '
               '(-p and -d) should be provided.')
         exit(1)

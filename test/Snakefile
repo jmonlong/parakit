@@ -60,13 +60,15 @@ rule map_reads:
 rule call:
     input:
         conf=config['parakit_config'],
-        gaf='{sample}/{sample}.sim.gaf.gz'
+        gaf='{sample}/{sample}.sim.gaf.gz',
+        info='{sample}/{sample}.sim.diplotype.paths-info.tsv',
+        stats='{sample}/{sample}.sim.diplotype.paths-stats.tsv'
     output:
         calls='{sample}/{sample}.sim.calls.tsv',
         filt='{sample}/{sample}.sim.filtered_calls.tsv'
     shell:
         """
-        parakit call -j {input.conf} -r {input.gaf} -o {output.calls}
+        parakit call -j {input.conf} -r {input.gaf} -d {input.stats} -p {input.info} -o {output.calls}
         parakit filtercalls -j {input.conf} -c {output.calls} -af -o {output.filt}
         """
 
