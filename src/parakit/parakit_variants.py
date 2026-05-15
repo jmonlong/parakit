@@ -383,7 +383,7 @@ class Fusions:
         self.variants = {}
         # number of markers used to decide if a variant is (likely) converted
         self.nmarkers = nmarkers
-        # TODO remember neighbors for each candidate breakpoint to
+        # remember neighbors for each candidate breakpoint to
         # help keep the strongest one in the cluster
         self.neighbors = {}
 
@@ -410,7 +410,90 @@ class Fusions:
     def importSubread(self, markers, nodes, sreadn,
                       support_only=False, is_haplotype=False):
         """Process a set of markers for a subread"""
-        # TODO record the neighbors in this function
+        # test each position
+        for m_idx in range(self.nmarkers, len(markers) - self.nmarkers):
+            # skip if no switch between this marker and the next
+            # except if we are looking for supporting reads
+            if markers[m_idx] == markers[m_idx + 1] and not support_only:
+                continue
+            # count markers for each module upstream and downstream
+            mark_u = markers[(m_idx - self.nmarkers):m_idx]
+            mark_d = markers[m_idx:(m_idx + self.nmarkers)]
+            u_c1 = mark_u.count('c1')
+            u_c2 = mark_u.count('c2')
+            d_c1 = mark_d.count('c1')
+            d_c2 = mark_d.count('c2')
+            # check proportion of c1/c2 upstream vs downstream
+            fusion_start_copy = None
+            fusion_end_copy = None
+            if u_c1 > 4 * u_c2:
+                fusion_start_copy = 'c1'
+            elif u_c2 > 4 * u_c1:
+                fusion_start_copy = 'c2'
+            if d_c1 > 4 * d_c2:
+                fusion_end_copy = 'c1'
+            elif d_c2 > 4 * d_c1:
+                fusion_end_copy = 'c2'
+            fusid = 'fus_{}_{}'.format(fusion_start_copy, nodes[m_idx])
+            # skip if the last marker of the upstream window is not
+            # from the same module
+            if markers[m_idx] != fusion_start_copy and not support_only:
+                continue
+            # is there a fusion signal? i.e. both sides have a defined
+            # and different assigned module
+            fusion_signal = fusion_start_copy is not None and \
+                fusion_end_copy is not None and \
+                fusion_start_copy != fusion_end_copy
+            if support_only:
+                # annotate support only
+                if fusid in self.variants:
+                    if fusion_signal:
+                        if is_haplotype:
+                            self.variants[fusid].addAltHap(sreadn)
+                        else:
+                            self.variants[fusid].addAltRead(sreadn)
+                    elif self.variants[fusid].copy == fusion_start_copy:
+                        if is_haplotype:
+                            self.variants[fusid].addRefHap(sreadn)
+                        else:
+                            self.variants[fusid].addRefRead(sreadn)
+                # also annotate reference reads on the other copy?
+                other_c = 'c1' if fusion_start_copy == 'c2' else 'c2'
+                fusid2 = 'fus_{}_{}'.format(other_c, nodes[m_idx])
+                if fusid2 in self.variants and not fusion_signal:
+                    if is_haplotype:
+                        self.variants[fusid2].addRefHap(sreadn)
+                    else:
+                        self.variants[fusid2].addRefRead(sreadn)
+            elif fusion_signal:
+                # looking for new fusion, potentially create a variant
+                if fusid not in self.variants:
+                    self.variants[fusid] = Variant(alt_trav=[nodes[m_idx],
+                                                             nodes[m_idx + 1]],
+                                                   varid=fusid)
+                    self.variants[fusid].copy = fusion_start_copy
+                if is_haplotype:
+                    self.variants[fusid].addAltHap(sreadn)
+                else:
+                    self.variants[fusid].addAltRead(sreadn)
+            # record neighbor nodes for this candidate fusion node
+            if fusion_signal:
+                m_node = nodes[m_idx]
+                if m_node not in self.neighbors:
+                    self.neighbors[m_node] = set()
+                for node in nodes[(m_idx - self.nmarkers):m_idx]:
+                    self.neighbors[m_node].add(node)
+                for node in nodes[(m_idx + 1):(m_idx + self.nmarkers)]:
+                    self.neighbors[m_node].add(node)
+
+    def importSubreadSingleBreakpoint(self, markers, nodes, sreadn,
+                                      support_only=False, is_haplotype=False):
+        """Process a set of markers for a subread (deprecated)
+
+        Previous approach best suited when there is only one
+        breakpoint in the subread. It looks at all the markers
+        before/after a position when searching for a switch.
+        """
         u_c1 = 0
         u_c2 = 0
         d_c1 = markers.count('c1')
@@ -483,31 +566,51 @@ class Fusions:
 
     def filterVariants(self, min_support=3):
         selected_vars = {}
+        # to remember which reads were already "used" for a fusion
+        # breakpoint around a node. readn -> set(node1, node2, ...)
+        used_reads = {}
+        used_haps = {}
         # sort by the most supporting reads
         vars_s = sorted(list(self.variants.keys()), reverse=True,
                         key=lambda vv: (self.variants[vv].nAltReads()
                                         + min_support * self.variants[vv].nAltHaps()))
-        used_reads = set()
-        used_haps = set()
-        # TODO issue with this approach is that reads/haps can only support one fusion breakpoint
-        # assign some (sub)reads
         for varid in vars_s:
+            # record the supporting reads/haps for this variant
             supp_reads = set()
             supp_haps = set()
+            m_node = self.variants[varid].alt_trav[0]
             for readn in self.variants[varid].reads_alt:
-                if readn not in used_reads:
+                is_supporting = True
+                if readn in used_reads:
+                    for node in used_reads[readn]:
+                        if node in self.neighbors[m_node]:
+                            # read is already used for a neighbor breakpoint
+                            is_supporting = False
+                            break
+                if is_supporting:
                     supp_reads.add(readn)
             for hapn in self.variants[varid].haps_alt:
-                if hapn not in used_haps:
+                is_supporting = True
+                if hapn in used_haps:
+                    for node in used_haps[hapn]:
+                        if node in self.neighbors[m_node]:
+                            # hap is already used for a neighbor breakpoint
+                            is_supporting = False
+                            break
+                if is_supporting:
                     supp_haps.add(hapn)
             if len(supp_reads) + min_support * len(supp_haps) >= min_support:
                 selected_vars[varid] = self.variants[varid]
                 selected_vars[varid].reads_alt = supp_reads
                 for readn in supp_reads:
-                    used_reads.add(readn)
+                    if readn not in used_reads:
+                        used_reads[readn] = set()
+                    used_reads[readn].add(m_node)
                 selected_vars[varid].haps_alt = supp_haps
                 for hapn in supp_haps:
-                    used_haps.add(hapn)
+                    if hapn not in used_haps:
+                        used_haps[hapn] = set()
+                    used_haps[hapn].add(m_node)
         self.variants = selected_vars
 
     def fillInfo(self, nodes):
@@ -804,7 +907,7 @@ def writeVariants(all_vars, config, output_tsv='calls.tsv'):
     ref_fa = pyfaidx.Fasta(config['ref_fa'])
 
     # write TSV output
-    print('Writing full summary in ' + output_tsv + '...')
+    print('Writing full summary in ' + output_tsv + ' ...')
     with open(output_tsv, 'wt') as outf:
         inc_headers = True
         for vid in var_ids:
@@ -816,7 +919,7 @@ def writeVariants(all_vars, config, output_tsv='calls.tsv'):
     output_bed = output_tsv + '.bed'
     if output_tsv.endswith('.tsv'):
         output_bed = output_tsv[:-3] + 'bed'
-    print('Writing BED summary in ' + output_bed + '...')
+    print('Writing BED summary in ' + output_bed + ' ...')
     with open(output_bed, 'wt') as outf:
         for vid in var_ids:
             outf.write(all_vars[vid].toBed(chrom=chrom) + '\n')
@@ -826,7 +929,7 @@ def writeVariants(all_vars, config, output_tsv='calls.tsv'):
     output_vcf = output_tsv + '.vcf'
     if output_tsv.endswith('.tsv'):
         output_vcf = output_tsv[:-3] + 'vcf'
-    print('Writing VCF summary in ' + output_vcf + '...')
+    print('Writing VCF summary in ' + output_vcf + ' ...')
     with open(output_vcf, 'wt') as outf:
         inc_headers = True
         for vid in var_ids:
