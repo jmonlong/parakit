@@ -1,3 +1,43 @@
+# `parakit call`
+
+```sh
+usage: parakit call [-h] -j J [-n N] [-r R] [-d D] [-p P] [-g G] [-a A] [-m M] [-s S] -o O [-t]
+
+options:
+  -h, --help  show this help message and exit
+  -j J        config JSON file
+  -n N        node information
+  -r R        (optional) input alignments in GAF
+  -d D        (optional) diplotype paths, sorted
+  -p P        (optional) haplotype paths information
+  -g G        input GFA pangenome
+  -a A        annotation file (e.g. from ClinVar)
+  -m M        number of markers checked around the SNPs
+  -s S        minimum support
+  -o O        output TSV
+  -t          debug trace mode
+```
+
+The main output, with maximal information, it the TSV specified with `-o`. 
+Two additional output files are generated: a BED file to help place the calls on IGV, and a VCF file (see details below).
+
+## Output VCF
+
+A VCF file generated and has the following *INFO* fields:
+
+- `RREF`: Number of reads supporting the reference allele.
+- `RALT`: Number of reads supporting the alternate allele.
+- `MALT`: Name of the haplotype-module with the alternate allele.
+- `CLIN`: ClinVar summary, if the alternate allele matches a ClinVar variant.
+
+To represent fusions/deletions, the VCF will contain the following *INFO* fields:
+
+- `END`: the end position of the fusion/deletion
+- `SVLEN`: the size of the deletion (difference in length between REF and ALT alleles).
+- `SVTYPE`: always *DEL*
+
+> Note: the genotype *GT* for all variants will be `0/1` (for now) because it's not straightforward to add a genotype when there are more than one gene copy.
+
 # `parakit deconstruct`
 
 *Soon.*

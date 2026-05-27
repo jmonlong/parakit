@@ -759,10 +759,12 @@ class Subread:
     Methods:
         assignCluster : assign to a cluster with a certain confidence
     """
-    def __init__(self, name, path, read_name):
+    def __init__(self, name, path, read_pos, start_node_pos, read_name):
         self.name = name
         self.read_name = read_name
         self.path = path
+        self.read_pos = read_pos
+        self.start_node_pos = start_node_pos
         self.cluster = None
         self.cluster_conf = 0
         self.in_module = True
@@ -875,7 +877,7 @@ class Subreads:
         for sreadn in self.sreads:
             self.sreads[sreadn].clearCluster()
 
-    def splitReads(self, reads, nodes, min_read_len=0):
+    def splitReads(self, reads, nodes, min_read_len=0, mod_name=False):
         # find cycle's boundaries and start node
         cyc_l = None
         cyc_r = None
@@ -907,8 +909,7 @@ class Subreads:
                     cur_group = 'flankr'
                 else:
                     cur_group = 'buffer'
-            else:
-                node_group[node] = cur_group
+            node_group[node] = cur_group
             nnode = None
             nn_pos = None
             for nn in nodes[node]['sucs']:
@@ -944,27 +945,37 @@ class Subreads:
             # skip if read with no informative nodes
             any_inf_nodes = False
             for nod in reads.path[readn]:
-                if nodes[nod]['class'] in ['c1', 'c2']:
-                    if nod in node_group and node_group[nod] == 'module':
-                        any_inf_nodes = True
-                        break
+                if (nodes[nod]['class'] in ['c1', 'c2']
+                        and nod in node_group
+                        and node_group[nod] == 'module'):
+                    any_inf_nodes = True
+                    break
             if not any_inf_nodes:
                 continue
             # split the reads at node involved in the cycle
             subreads = [[]]
+            # save the read positions
+            read_pos = [[]]
+            # save the node index range
+            start_node_pos = [0]
             add_subread = False
-            for nod in reads.path[readn]:
+            for node_ii in range(len(reads.path[readn])):
+                nod = reads.path[readn][node_ii]
                 if nod == cyc_l:
                     if len(subreads[-1]) > 0:
                         add_subread = True
                 if nod == cyc_r:
                     subreads[-1].append(nod)
+                    read_pos[-1].append(reads.readpos[readn][node_ii])
                     add_subread = True
                 else:
                     if add_subread:
                         subreads.append([])
+                        read_pos.append([])
+                        start_node_pos.append(node_ii)
                         add_subread = False
                     subreads[-1].append(nod)
+                    read_pos[-1].append(reads.readpos[readn][node_ii])
             subreads_t = []
             for spath in subreads:
                 group = None
@@ -980,9 +991,24 @@ class Subreads:
             if len(subreads_t) == 1 and subreads_t[0] != 'module':
                 continue
             # otherwise, save the subreads
+            mod_cpt = 0
+            buf_cpt = 0
             for sbi, sr_path in enumerate(subreads):
-                sreadn = '{}_{}'.format(readn, sbi)
-                subread = Subread(sreadn, sr_path, readn)
+                sreadn = '{}_sr{}'.format(readn, mod_cpt)
+                if mod_name:
+                    # interpretable name using modules only,
+                    # e.g. READ_2, READ_b1
+                    if subreads_t[sbi] == 'module':
+                        mod_cpt += 1
+                        sreadn = '{}_{}'.format(readn, mod_cpt)
+                    elif subreads_t[sbi] == 'buffer':
+                        buf_cpt += 1
+                        sreadn = '{}_b{}'.format(readn, buf_cpt)
+                else:
+                    # simple subread name READ_srX
+                    mod_cpt += 1
+                subread = Subread(sreadn, sr_path, read_pos[sbi],
+                                  start_node_pos[sbi], readn)
                 if subreads_t[sbi] != 'module':
                     subread.in_module = False
                     subread.assignCluster(subreads_t[sbi], 1)
@@ -1282,7 +1308,6 @@ class Subreads:
             return ('c1')
         else:
             return (None)
-
 
 
 def makeFlankConsensus(nodes, flank_type='flankl'):

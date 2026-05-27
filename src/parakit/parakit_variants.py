@@ -117,6 +117,7 @@ class Variant:
 ##contig=<ID={},length={}>
 ##INFO=<ID=RREF,Number=1,Type=Integer,Description="Number of reads supporting the reference allele">
 ##INFO=<ID=RALT,Number=1,Type=Integer,Description="Number of reads supporting the alternate allele">
+##INFO=<ID=MALT,Number=.,Type=String,Description="Haplotype-module with the alternate allele">
 ##INFO=<ID=END,Number=1,Type=Integer,Description="End position for a fusion/deletion">
 ##INFO=<ID=CLIN,Number=1,Type=String,Description="ClinVar summary">
 ##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">
@@ -159,6 +160,8 @@ class Variant:
             infos.append('CLIN={}'.format(self.clinvar))
         infos.append('RREF={}'.format(len(self.reads_ref)))
         infos.append('RALT={}'.format(len(self.reads_alt)))
+        if len(self.haps_alt) > 0:
+            infos.append('MALT={}'.format(','.join(list(self.haps_alt))))
         # prepare VCF record
         res_r = "{}\t{}\t{}".format(chrom, pos, self.getVariantID())
         res_r += "\t{}\t{}\t30\tPASS\t{}".format(ref, alt, ';'.join(infos))
@@ -854,8 +857,10 @@ def findVariants(nodes, annot_fn, config,
     shaps = None
     if haps is not None:
         shaps = pkpath.Subreads()
-        haps = pkclass.Haplotypes(haps)
-        shaps.splitReads(haps, nodes)
+        haps_o = pkclass.Haplotypes()
+        for hapn in haps:
+            haps_o.addHaplotype(hapn, haps[hapn], nodes)
+        shaps.splitReads(haps_o, nodes, mod_name=True)
 
     # look for read support for variant edges in vedges
     vars = ConvertedVariants(nmarkers)
@@ -869,7 +874,7 @@ def findVariants(nodes, annot_fn, config,
     vars.offsetPositions(pos_offset)
 
     # look for deletions/fusions
-    fusions = Fusions()
+    fusions = Fusions(nmarkers)
     if sreads is not None:
         fusions.importSubreads(sreads, nodes)
         fusions.importSubreads(sreads, nodes, support_only=True)

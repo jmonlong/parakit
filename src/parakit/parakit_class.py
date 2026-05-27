@@ -249,6 +249,31 @@ class Reads:
 # for now more of a minimal placeholder class to work as input to
 # splitReads (Subreads object)
 class Haplotypes:
-    def __init__(self, haps):
-        self.path = haps
+    def __init__(self):
+        self.path = {}
         self.read_len = {}
+        self.readpos = {}
+
+    def addHaplotype(self, hap_name, path, nodes):
+        """Add a new haplotype
+
+        If provided startpos/endpos/readpos should have the same
+        length as path. They represent where the alignment
+        started/ended in each node of the alignment path. For readpos,
+        it records the (starting) position in the read/haplotype for each node
+        in the alignment path.
+
+        Args:
+            hap_name : the name of the read
+            path : list of nodes traversed by the read
+            nodes : dict with node information
+
+        """
+        # save path and position in the sequenced read
+        self.path[hap_name] = path
+        readpos = []
+        cur_pos = 0
+        for node in path:
+            readpos.append(cur_pos)
+            cur_pos += nodes[node]['size']
+        self.readpos[hap_name] = readpos
