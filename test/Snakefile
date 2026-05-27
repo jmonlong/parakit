@@ -13,6 +13,7 @@ rule main:
         annotate_pdf=expand('{sample}/{sample}.sim.dip_annotated.pdf', sample=config['sample']),
         pdf=expand('{sample}/{sample}.sim.all_small.pdf', sample=config['sample']),
         bam=expand("{sample}/{sample}.sim.parakit_surjected_diplotype.bam", sample=config['sample']),
+        bam_gene=expand("{sample}/{sample}.sim.parakit_surjected_gene.bam", sample=config['sample'])
 
 rule deconstruct:
     input: config['parakit_config']
@@ -120,4 +121,15 @@ rule surject:
     shell:
         """
         parakit surject -j {input.conf} -r {input.gaf} -f {input.fq} -d {input.dips} -p {input.haps} -o {output}
+        """
+
+rule surject_gene:
+    input:
+        conf=config['parakit_config'],
+        gaf='{sample}/{sample}.sim.gaf.gz',
+        fq='{sample}/{sample}.sim.fq'
+    output: "{sample}/{sample}.sim.parakit_surjected_gene.bam"
+    shell:
+        """
+        parakit surject -j {input.conf} -r {input.gaf} -f {input.fq} -o {output}
         """

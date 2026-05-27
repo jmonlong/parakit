@@ -18,14 +18,16 @@ def selectSubreads(reads, nodes, module='c2'):
                         - end position in read
     """
     # split reads into subreads
-    sreads = splitReads(reads, nodes)
+    sreads = pkpath.Subreads()
+    sreads.splitReads(reads, nodes)
     # select those that are mostly in the module and the interval
     sreads_sel = {}
-    for sreadn in sreads:
+    for sreadn in sreads.sreads:
+        sread = sreads.sreads[sreadn]
         # count how many informative nodes are from the target module
         inf_nodes = 0
         mod_nodes = 0
-        for node in sreads[sreadn]['path']:
+        for node in sread.path:
             if nodes[node]['class'] == 'c1' or nodes[node]['class'] == 'c2':
                 inf_nodes += 1
             if nodes[node]['class'] == module:
@@ -33,9 +35,9 @@ def selectSubreads(reads, nodes, module='c2'):
         if inf_nodes > 5 and float(mod_nodes) / inf_nodes > .5:
             # consider this subreads as potentially part of the target module
             sreads_sel[sreadn] = {}
-            sreads_sel[sreadn]['read'] = sreads[sreadn]['read']
-            sreads_sel[sreadn]['start'] = min(sreads[sreadn]['pos'])
-            sreads_sel[sreadn]['end'] = max(sreads[sreadn]['pos'])
+            sreads_sel[sreadn]['read'] = sread.read_name
+            sreads_sel[sreadn]['start'] = min(sread.read_pos)
+            sreads_sel[sreadn]['end'] = max(sread.read_pos)
     return sreads_sel
 
 
@@ -81,33 +83,41 @@ def selectSubreadsOnDip(reads, nodes, dip_paths):
                 hap_b_alns[rn]['hap'] = hns[1]
     # split haplotypes
     haps_annot = {}
-    haps_annot[hns[0]] = annotateHaplotype(dip_paths[hapn], nodes)
-    haps_annot[hns[1]] = annotateHaplotype(dip_paths[hapn], nodes)
+    haps_annot[hns[0]] = annotateHaplotype(dip_paths[hns[0]], nodes)
+    haps_annot[hns[1]] = annotateHaplotype(dip_paths[hns[1]], nodes)
     # split reads into subreads
-    sreads = splitReads(reads, nodes)
-    # annotate with the  those that are mostly in the module and the interval
+    sreads = pkpath.Subreads()
+    sreads.splitReads(reads, nodes)
+    # annotate with those that are mostly in the module and the interval
     sreads_sel = {}
-    for sreadn in sreads:
-        readn = sreads[sreadn]['read']
+    for sreadn in sreads.sreads:
+        sread = sreads.sreads[sreadn]
+        # skip if not a "module" subread?
+        if not sread.in_module:
+            continue
+        # otherwise find the haplotype-module where is (mostly) map
+        readn = sread.read_name
         # find assigned haplotype
         hapn = hap_b_alns[readn]['hap']
         # find most common module
         mod_d = {}
-        for node_idx in sreads[sreadn]['node_idx']:
-            if node_idx in hap_b_alns[readn]['read_hap_pos']:
-                hap_idx = hap_b_alns[readn]['read_hap_pos'][node_idx]
+        node_pos = sread.start_node_pos
+        for node_offset in range(len(sread.path)):
+            if node_pos in hap_b_alns[readn]['read_hap_pos']:
+                hap_idx = hap_b_alns[readn]['read_hap_pos'][node_pos]
                 mod = haps_annot[hapn][hap_idx]
                 if mod not in mod_d:
                     mod_d[mod] = 0
                 mod_d[mod] += 1
+            node_pos += 1
         mod_s = sorted(list(mod_d.keys()), key=lambda k: mod_d[k],
                        reverse=True)
         mod_s = mod_s[0]
         # prepare the subread info
         sreads_sel[sreadn] = {}
-        sreads_sel[sreadn]['read'] = sreads[sreadn]['read']
-        sreads_sel[sreadn]['start'] = min(sreads[sreadn]['pos'])
-        sreads_sel[sreadn]['end'] = max(sreads[sreadn]['pos'])
+        sreads_sel[sreadn]['read'] = sread.read_name
+        sreads_sel[sreadn]['start'] = min(sread.read_pos)
+        sreads_sel[sreadn]['end'] = max(sread.read_pos)
         sreads_sel[sreadn]['haplotype'] = hapn
         sreads_sel[sreadn]['module'] = '{}_{}'.format(hapn, mod_s)
     return sreads_sel
@@ -268,8 +278,7 @@ def annotateHaplotype(path, nodes):
                 cur_group = 'flankr'
             else:
                 cur_group = 'buffer'
-        else:
-            node_group[node] = cur_group
+        node_group[node] = cur_group
         nnode = None
         nn_pos = None
         for nn in nodes[node]['sucs']:
@@ -298,7 +307,7 @@ def annotateHaplotype(path, nodes):
         node = nnode
     # process the path
     annot = []
-    cur_mod = 0
+    cur_mod = 1
     cur_group = 'flankl'
     for nod in path:
         if nod in node_group:
