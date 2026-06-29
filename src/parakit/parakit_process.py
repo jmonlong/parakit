@@ -2,6 +2,7 @@ import parakit.parakit_io as pkio
 import os
 import subprocess
 import pyfaidx
+import gzip
 
 
 def writeFasta(outfn, seqn, seq, wrap=80):
@@ -539,6 +540,9 @@ def extractSubreads(sel_sreads, in_fq_fn, out_fq_fn):
     fq_seq = {}
     fq_bq = {}
     inf = open(in_fq_fn, 'rt')
+    if in_fq_fn.endswith('.gz'):
+        inf.close()
+        inf = gzip.open(in_fq_fn, 'rt')
     cur_readn = None
     line_i = 0
     for line in inf:
