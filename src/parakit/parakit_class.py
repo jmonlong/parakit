@@ -1,3 +1,4 @@
+# TODO remove this class
 class ReadPosList:
     def __init__(self):
         # record reads and position(s)
@@ -18,27 +19,6 @@ class ReadPosList:
                 self.read_to_pos[readn] = []
             for read_pos in rpl.read_to_pos[readn]:
                 self.read_to_pos[readn].append(read_pos)
-
-    def countIntersect(self, other_rp, max_pos_diff=-1):
-        ninter = 0
-        for readn in self.read_to_pos:
-            # sanity check that the array of positions is not empty
-            if len(self.read_to_pos[readn]) == 0:
-                continue
-            # if absent from other list, skip
-            if readn not in other_rp.read_to_pos or \
-               len(other_rp.read_to_pos[readn]) == 0:
-                continue
-            # if we don't want to check positions, count as matched
-            if max_pos_diff < 0:
-                ninter += 1
-                continue
-            # otherwise, make sure the pos are not too far from each other
-            for rpos in self.read_to_pos[readn]:
-                for rpos2 in other_rp.read_to_pos[readn]:
-                    if abs(rpos - rpos2) <= max_pos_diff:
-                        ninter += 1
-        return (ninter)
 
     def removeReads(self, other_rp, max_pos_diff=-1, verbose=False):
         nrem = []

@@ -170,6 +170,9 @@ class EvaluationScores:
             if adj_meth[metric] == 'max':
                 # divide all scores by the max
                 for dipn in self.scores:
+                    if max_val == 0:
+                        print('Warning: max value for {} was 0 ({})'.format(metric, dipn))
+                        max_val = 1
                     adj_val = float(self.scores[dipn][metric]) / max_val
                     adj_scores[dipn][metric] = adj_val
             elif adj_meth[metric] == 'minmax':

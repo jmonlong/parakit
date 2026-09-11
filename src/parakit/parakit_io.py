@@ -79,61 +79,35 @@ def parseCg(cg):
 
 
 def parseCs(cs):
-    nums = [str(ii) for ii in range(10)]
-    num_c = ''
-    type_c = ''
     res = []
-    # we'll consider exact matches and substitutions together, like the M in
-    # the CIGAR string.
-    # With var_size, we keep track of the size of this M segment
-    var_size = 0
-    for cc in cs:
-        if cc in [':', '*']:
-            if type_c != 'M':
-                # we were not in a M segment, start new segment
-                if type_c != '':
-                    # if not the first segment, save and start new one
-                    num_c = 0 if num_c == '' else int(num_c)
-                    res.append([num_c + var_size, type_c])
-                type_c = 'M'
-                num_c = ''
-                var_size = 0
+    nums = [str(ii) for ii in range(10)]
+    cs_idx = 0
+    while cs_idx < len(cs):
+        if cs[cs_idx] == ':':
+            # match
+            cs_idx += 1
+            num_c = ''
+            while cs_idx < len(cs) and cs[cs_idx] in nums:
+                num_c += cs[cs_idx]
+                cs_idx += 1
+            res.append([int(num_c), '='])
+        elif cs[cs_idx] == '*':
+            res.append([1, 'X'])
+            cs_idx += 3
+        elif cs[cs_idx] in ['-', '+']:
+            # deletion or insertion
+            is_del = cs[cs_idx] == '-'
+            cs_idx += 1
+            num_indel = 0
+            while cs_idx < len(cs) and cs[cs_idx] in ['A', 'G', 'C', 'T', 'N']:
+                num_indel += 1
+                cs_idx += 1
+            if is_del:
+                res.append([num_indel, 'D'])
             else:
-                # we're extending a M segment
-                if num_c != '':
-                    # if we were extending a ":[0-9]+", update the size
-                    var_size += int(num_c)
-                num_c = ''
-            # if we're starting a substitution, we know it will be of size 1
-            if cc == '*':
-                var_size += 1
-        elif cc == '+':
-            if type_c != '':
-                # if not the first segment, save and start new one
-                num_c = 0 if num_c == '' else int(num_c)
-                res.append([num_c + var_size, type_c])
-            type_c = 'I'
-            num_c = ''
-            var_size = 0
-        elif cc == '-':
-            if type_c != '':
-                # if not the first segment, save and start new one
-                num_c = 0 if num_c == '' else int(num_c)
-                res.append([num_c + var_size, type_c])
-            type_c = 'D'
-            num_c = ''
-            var_size = 0
-        elif cc in nums:
-            # for numbers, update num_c
-            num_c += cc
-        elif cc in ['A', 'T', 'G', 'C', 'N']:
-            # nucleotides mean we're in an insertion or deletion segment
-            if type_c in ['I', 'D']:
-                var_size += 1
+                res.append([num_indel, 'I'])
         else:
-            print('W: unexpected character in cs tag', cc)
-    num_c = 0 if num_c == '' else int(num_c)
-    res.append([num_c + var_size, type_c])
+            print('W: unexpected character in cs tag', cs[cs_idx])
     return res
 
 
@@ -195,7 +169,14 @@ def readGAF(filen, nodes, verbose=False, min_read_len=0):
     nsupp_aln = 0
     nunmp = 0
     for line in inf_gaf:
+        # skip header line
+        if line[0] == '@':
+            continue
+        # otherwise parse the line
         line = line.rstrip().split('\t')
+        # skip if unmapped
+        if line[7] == '*':
+            continue
         # if read was seen before, skip supp aln
         readn = line[0]
         if reads_tr.hasRead(readn):
@@ -221,6 +202,8 @@ def readGAF(filen, nodes, verbose=False, min_read_len=0):
                 tag_s = tag.split(':')
                 if tag_s[0] == 'cs':
                     cg = parseCs(tag[5:])
+                    # print(tag[5:])
+                    # print(cg)
                     break
             if cg == '':
                 nunmp += 1
@@ -257,7 +240,7 @@ def readGAF(filen, nodes, verbose=False, min_read_len=0):
                 if cc[1] in ['I', 'X', '=', 'M']:
                     read_pos += 1
                 if cc[1] in ['D', 'X', '=', 'M']:
-                    if cc[1] in ['=']:
+                    if cc[1] in ['=', 'M']:
                         cur_endpos = node_pos
                     node_pos += 1
                     if node_pos >= nodes[path[n_idx][0]]['size']:
@@ -280,6 +263,8 @@ def readGAF(filen, nodes, verbose=False, min_read_len=0):
                 path_node_startpos[ii] = path_node_endpos[ii]
                 path_node_endpos[ii] = spos
         path_cov_node = [pc[0] for pc in path_cov]
+        # print('{}\n{}\n{}\n\n'.format(readn, path_node_startpos,
+        #                               path_node_endpos))
         reads_tr.addRead(readn, path_cov_node,
                          startpos=path_node_startpos,
                          endpos=path_node_endpos,
@@ -299,7 +284,7 @@ def readGAFstats(filen, nodes):
     # find flanking reference nodes (to filter reads only touching those)
     flank_nodes = []
     for nod in nodes:
-        if nodes[nod]['class'] == 'ref':
+        if nodes[nod]['rpos_min'] == nodes[nod]['rpos_max']:
             flank_nodes.append(nod)
     # prepare result object
     res = {'read': [], 'length': [], 'aligned': [], 'matches': [],
@@ -310,6 +295,9 @@ def readGAFstats(filen, nodes):
     else:
         inf_gaf = open(filen, 'rt')
     for line in inf_gaf:
+        # skip header lines
+        if line[0] == '@':
+            continue
         line = line.rstrip().split('\t')
         # parse path and filter if only touching flanks
         path = parsePath(line[5])

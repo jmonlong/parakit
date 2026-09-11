@@ -1287,13 +1287,15 @@ def estimateCopyNumberFromFlanks(nodes, reads, window_size=20):
     for noden in nodes:
         # if nodes[noden]['rpos_min'] == nodes[noden]['rpos_max']:
         #     fl_nodes.append(noden)
-        if nodes[noden]['class'] == 'ref':
+        if (nodes[noden]['class'] == 'ref' and
+                nodes[noden]['rpos_min'] == nodes[noden]['rpos_max']):
             fl_nodes.append(noden)
     # count the reads taking the flank or cycling edges
     for readn in reads.path:
         path = reads.path[readn]
         for pos, noden in enumerate(path):
             # increment counts for each informative edge
+            # TODO: fix assignment of flank vs cycle (think buffer)
             if nodes[noden]['class'] in ['cyc_l', 'cyc_r']:
                 # check up to 'window_size' nodes upstream and downstream
                 up_pos = max(0, pos - window_size)
@@ -1311,7 +1313,8 @@ def estimateCopyNumberFromFlanks(nodes, reads, window_size=20):
                     cyc += 1
     fl = fl / 2
     print('flank\t{}'.format(fl))
-    cyc = cyc / 2
+    # TODO stop double-counting cycles
+    cyc = cyc / 4
     print('cycle\t{}'.format(cyc))
     cn = (fl + cyc) / fl
     # assume diploid genome
@@ -1360,7 +1363,7 @@ def estimateCopyNumber(nodes, reads, out_tsv_prefix='parakit.cn',
                 # update node coverage
                 rstart = reads.getStartPos(readn, nii)
                 rend = reads.getEndPos(readn, nii)
-                # print(readn)
+                # print('{}: {}-{}'.format(readn, rstart, rend))
                 node_cov[noden].addRead(min(rstart, rend), max(rstart, rend))
                 # update edge coverage
                 if nii > 0:

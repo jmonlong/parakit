@@ -378,7 +378,7 @@ def extractReads(config, in_reads, out_fq, trace=False):
     os.remove(temp_bam)
 
 
-def mapReads(in_fq, pg_gfa, out_gaf):
+def mapReadsGraphAligner(in_fq, pg_gfa, out_gaf):
     # GraphAligner outputs an unzipped GAF file
     ga_gaf = out_gaf
     if out_gaf.endswith('.gz'):
@@ -406,6 +406,50 @@ def mapReads(in_fq, pg_gfa, out_gaf):
         out_gaf_f.close()
         # and delete it
         os.remove(ga_gaf)
+
+
+def mapReadsGiraffe(in_fq, pg_gfa, out_gaf):
+    # Giraffe outputs an unzipped GAF file
+    gbz_fn = pg_gfa[:-3] + 'giraffe.giraffe.gbz'
+    # prepare vg giraffe command, using 1 thread and in ONT mode
+    vg_cmd = ['vg', 'giraffe', '-Z', gbz_fn, '-f', in_fq,
+              '-b', 'r10', '-t', '1', '-o', 'gaf',
+              '--max-tail-length', '0', '--max-chain-connection', '0']
+    # note: max-tail-length/max-chain-connection is to disable the WFA
+    # alignment per haplotype because we DON'T want to to necessarily
+    # be consistent with the haplotypes in the pangenome. We are
+    # looking for rare/pathogenic haplotypes.  check if GraphAligner
+    # is installed
+    if not toolAvailable('vg'):
+        print('Error: vg is not installed.')
+        exit(1)
+    # run and redirect output to GAF file
+    map_o = subprocess.run(vg_cmd, check=True, capture_output=True)
+    # prepare an output stream for the GAF output
+    out_gaf_f = open(out_gaf, 'wt')
+    if out_gaf.endswith('.gz'):
+        # if we want an gzipped output, abort and open a gzip stream
+        out_gaf_f.close()
+        out_gaf_f = gzip.open(out_gaf, 'wt')
+    out_gaf_f.write(map_o.stdout.decode())
+    out_gaf_f.close()
+
+
+def indexGfaForGiraffe(pg_gfa):
+    if not pg_gfa.endswith('.gfa'):
+        print('Input pangenome must be an unzipped GFA file. Got ' + pg_gfa)
+        exit(1)
+    index_base_prefix = pg_gfa[:-3] + 'giraffe'
+    # first make the GBZ manually because autoindex chops the nodes too much
+    gbz_fn = index_base_prefix + '.giraffe.gbz'
+    vg_cmd = ['vg', 'gbwt', '-G', pg_gfa, '-g', gbz_fn]
+    subprocess.run(vg_cmd, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # make the index files with autoindex
+    vg_cmd = ['vg', 'autoindex', '-p', index_base_prefix,
+              '-w', 'lr-giraffe', '-G', gbz_fn, '-t', '1', '-n']
+    subprocess.run(vg_cmd, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def runRscript(script_r, args):

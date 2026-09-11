@@ -50,6 +50,9 @@ def scmd_construct(args):
             cons_proc = pkproc.constructPgPggb(config, opref, pg_gfa,
                                                threads=args.t)
         refname = cons_proc['refname']
+    # prepare giraffe index files
+    print('Making index files for vg giraffe...')
+    pkproc.indexGfaForGiraffe(pg_gfa)
     # annotate the nodes in the graph
     pkio.readGFA(pg_gfa, refname=refname, out_tsv=node_tsv,
                  guess_modules=config['method'] != 'mc')
@@ -105,6 +108,8 @@ pars_map.add_argument('-g', help='input GFA pangenome', default='')
 pars_map.add_argument('-b', help='input (indexed) BAM file', required=True)
 pars_map.add_argument('-o', help='output GAF file', required=True)
 pars_map.add_argument('-t', help='debug trace mode', action='store_true')
+pars_map.add_argument('-m', default='giraffe',
+                      help='read mapper: giraffe (default), graphaligner')
 pars_map.set_defaults(scmd='map')
 
 
@@ -122,7 +127,19 @@ def scmd_map(args):
         pkproc.extractReads(config, args.b, fq_fn, trace=args.t)
     # map reads to pangenome
     pg_gfa = pkio.gfaFile(config, fn=args.g, check_file=True)
-    pkproc.mapReads(fq_fn, pg_gfa, args.o)
+    if args.m == 'giraffe':
+        # check if the index files are present
+        gbz_fn = pg_gfa[:-3] + 'giraffe.giraffe.gbz'
+        if not os.path.isfile(gbz_fn):
+            print('Missing index files for giraffe mapping. '
+                  'Attempting to make them...')
+            pkproc.indexGfaForGiraffe(pg_gfa)
+        pkproc.mapReadsGiraffe(fq_fn, pg_gfa, args.o)
+    elif args.m == 'graphaligner':
+        pkproc.mapReadsGraphAligner(fq_fn, pg_gfa, args.o)
+    else:
+        print('Read mapper (-m) must be giraffe or graphaligner.')
+        exit(1)
     print('Output GAF: ' + args.o)
 
 
