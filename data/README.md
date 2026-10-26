@@ -1,5 +1,18 @@
 ## Provided files
 
+Download from this repository, in this `data` folder.
+
+### HPRC v2 (recommended)
+
+- `rccx.grch38_hprc2.mcc.config.json` the configuration file for this pangenome (contains coordinates, flank size, etc used to build the pangenome)
+- `rccx.grch38_hprc2.mcc.pg.gfa` the pangenome in GFA format
+- `rccx.grch38_hprc2.mcc.node_info.tsv` metadata about the nodes in the pangenome, e.g. which one is specific to module 1/2.
+- Annotation files:
+    - `CYP21A2.pathogenic.variant_summary.2024_09_03.tsv` reformatted subset of ClinVar including CYP21A2 pathogenic variants
+    - `CYP21A2.gencodev43.nearby_genes.tsv` reformatted subset of GENCODE containing gene annotation in the region.
+
+### HPRC v1
+
 - `rccx.grch38_hprc.mc.config.json` the configuration file for this pangenome (contains coordinates, flank size, etc used to build the pangenome)
 - `rccx.grch38_hprc.mc.pg.gfa` the pangenome in GFA format
 - `rccx.grch38_hprc.mc.node_info.tsv` metadata about the nodes in the pangenome, e.g. which one is specific to module 1/2.
@@ -11,7 +24,35 @@ See [rccx.summary.md](rccx.summary.md) for some descriptive metrics on this pang
 
 ## Pangenome construction
 
-### Download HPRC sequence and install AGC
+Although all necessary files are provided in this repository (see above), some pointers on how the those pangenomes were constructed are given below.
+
+### HPRC v2
+
+#### Download HPRC sequences and install AGC
+
+AGC (https://github.com/refresh-bio/agc) will be used to extract the sequence of interest during pangenome construction. 
+It needs to be installed (easiest is to download a prebuilt binary from the [release page](https://github.com/refresh-bio/agc/releases)).
+
+The AGC file with the HPRC assemblies will also be needed for pangenome construction.
+Download it with:
+
+```sh
+wget https://s3-us-west-2.amazonaws.com/human-pangenomics/submissions/B4174A5F-F20E-4DCF-8470-F8A907B640BC--HPRCv2_0.6.1_pr_agc_submission/HPRC_r2_assemblies_0.6.1.agc
+```
+
+#### Prepare coordinates of the RCCX region in each assembly
+
+*Soon: script to create the `hprc2.cyp21a.haps.coords.tsv` used below and included in this repository.*
+
+#### Run
+
+```sh
+parakit construct -j rccx.grch38_hprc2.mcc.config.json
+```
+
+### HPRC v1
+
+#### Download HPRC sequence and install AGC
 
 AGC (https://github.com/refresh-bio/agc) will be used to extract the sequence of interest during pangenome construction. 
 It needs to be installed (easiest is to download a prebuilt binary from the [release page](https://github.com/refresh-bio/agc/releases)).
@@ -23,7 +64,7 @@ Download it with:
 wget -O HPRC-yr1.agc https://zenodo.org/record/5826274/files/HPRC-yr1.agc?download=1
 ```
 
-### Prepare/download HPRC annotation files
+#### Prepare/download HPRC annotation files
 
 The paths to the Ensembl annotations was compiled in [hprc.ensembl.gff3.paths.tsv](hprc.ensembl.gff3.paths.tsv) (with [list.ensembl.paths.R](list.ensembl.paths.R)).
 
@@ -41,7 +82,7 @@ For example:
 snakemake --cores 8
 ```
 
-### Method 1 - Specifying the position of each module in all input assemblies
+#### Method 1 - Specifying the position of each module in all input assemblies
 
 The first method developed.
 
@@ -54,7 +95,7 @@ The first method developed.
     - More "manual" work
     - Can't integrate as much sequence as not all sequence are clearly
 
-#### Find position of each module in the HPRC assemblies
+##### Find position of each module in the HPRC assemblies
 
 Using the downloaded HPRC annotations, the coordinates for the RCCX modules for each assembly were extracted by identifying haplotypes where one gene and one pseudogene were confidently annotated.
 See [extract-rccx-coords.md report](extract-rccx-coords.md) for details.
@@ -62,7 +103,7 @@ It creates the [`hprc.cyp21a.coords.tsv`](hprc.cyp21a.coords.tsv) file.
 It's a TSV with no header containing the coordinate of each module/copy for the HPRC haplotype to extract.
 The three column in the file are: sample name, contig name, label (*c1_\** for a module/copy 1 allele, *c2_\** for a module/copy 2 allele).
 
-#### Config file
+##### Config file
 
 Create a config file, see [`rccx.grch38_hprc.mc.config.json`](rccx.grch38_hprc.mc.config.json) file:
 
@@ -78,7 +119,7 @@ Create a config file, see [`rccx.grch38_hprc.mc.config.json`](rccx.grch38_hprc.m
 }
 ```
 
-### Method 2 - Specifying the region of interest in all input assemblies
+#### Method 2 - Specifying the region of interest in all input assemblies
 
 Newer method that lets the pangenome builder do the collapse. 
 We guess the modules after building the pangenome
@@ -91,7 +132,7 @@ We guess the modules after building the pangenome
     - Pangenome might be more complex
     - Not tested as much
 
-#### Find position of each module in the HPRC assemblies
+##### Find position of each module in the HPRC assemblies
 
 Using the downloaded HPRC annotations, we want to find the contig and coordinates of the region of interest in each HPRC assembly.
 See [extract-rccx-region-coords.md report](extract-rccx-region-coords.md) for details.
@@ -99,7 +140,7 @@ It creates the [hprc.cyp21a.haps.coords.tsv](hprc.cyp21a.haps.coords.tsv) specif
 It's a TSV with no header containing the coordinate of the region of interest to extract.
 The two columns in the file are: sample name and coordinates.
 
-#### Config file
+##### Config file
 
 Create a config file, see [`rccx.grch38_hprc.mcc.config.json`](rccx.grch38_hprc.mcc.config.json) file.
 Short vesion:
@@ -116,8 +157,7 @@ Short vesion:
 }
 ```
 
-
-### Run
+#### Run
 
 ```sh
 parakit construct -j config.json
@@ -128,7 +168,7 @@ Will create two output files:
 1. A GFA file with the pangenome (`.gfa`)
 2. A TSV with node information (`.node_info.tsv`)
 
-### QC - Visualize the pangenome
+#### QC - Visualize the pangenome
 
 - Open the GFA in [Bandage](https://rrwick.github.io/Bandage/)
 - Compute stats about the nodes classifications using something like [rccx.summary.md](rccx.summary.md) (source [rccx.summary.Rmd](rccx.summary.Rmd))

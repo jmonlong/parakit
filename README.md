@@ -70,16 +70,14 @@ The [`Dockerfile`](Dockerfile) can also give hints how to install all the depend
 
 ## GRCh38+HPRC RCCX pangenome
 
-Ready-to-use files for the RCCX pangenome, available in the [`data` folder](data)
+Ready-to-use files for the RCCX pangenome, using HPRC v2 (462 haplotypes), available in the [`data` folder](data)
 
-- `rccx.grch38_hprc.mc.config.json` the configuration file for this pangenome (contains coordinates, flank size, etc used to build the pangenome)
-- `rccx.grch38_hprc.mc.pg.gfa` the pangenome in GFA format
-- `rccx.grch38_hprc.mc.node_info.tsv` metadata about the nodes in the pangenome, e.g. which one is specific to module 1/2.
-- Annotation files
+- `rccx.grch38_hprc2.mcc.config.json` the configuration file for this pangenome (contains coordinates, flank size, etc used to build the pangenome)
+- `rccx.grch38_hprc2.mcc.pg.gfa` the pangenome in GFA format
+- `rccx.grch38_hprc2.mcc.node_info.tsv` metadata about the nodes in the pangenome, e.g. which one is specific to module 1/2.
+- Annotation files:
     - `CYP21A2.pathogenic.variant_summary.2024_09_03.tsv` reformatted subset of ClinVar including CYP21A2 pathogenic variants
     - `CYP21A2.gencodev43.nearby_genes.tsv` reformatted subset of GENCODE containing gene annotation in the region.
-
-See [data/rccx.summary.md](data/rccx.summary.md) for some descriptive metrics on this pangenome.
 
 The files mentioned above are the output of the pangenome construction.
 They can be used to analyze a new long-read sequencing samples using the [commands](#commands) below.
@@ -92,7 +90,7 @@ For example, to analyze one sample with an indexed BAM file (aligned to GRCh38).
 To extract relevant reads and map them to the pangenome
 
 ```bash
-parakit map -j rccx.grch38_hprc.mc.config.json -b input.bam -o reads.gaf.gz
+parakit map -j rccx.grch38_hprc2.mcc.config.json -b input.bam -o reads.gaf.gz
 ```
 
 This creates the `reads.gaf.gz` GAF file.
@@ -100,20 +98,20 @@ This creates the `reads.gaf.gz` GAF file.
 Then, to look for variant-supporting reads
 
 ```bash
-parakit call -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o calls.tsv
+parakit call -j rccx.grch38_hprc2.mcc.config.json -r reads.gaf.gz -o calls.tsv
 ```
 
 The reads/calls are saved in `calls.tsv`.
 They can be filtered with:
 
 ```bash
-parakit filtercalls -j rccx.grch38_hprc.mc.config.json -c calls.tsv -af -o calls.filtered.tsv
+parakit filtercalls -j rccx.grch38_hprc2.mcc.config.json -c calls.tsv -af -o calls.filtered.tsv
 ```
 
 To list and evaluate candidate diplotype:
 
 ```bash
-parakit diplotype -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o diplotype
+parakit diplotype -j rccx.grch38_hprc2.mcc.config.json -r reads.gaf.gz -o diplotype
 ```
 
 This command creates two files
@@ -129,7 +127,7 @@ Finally, the visualization command makes a figure.
 The *all* mode, will make a multi-panel figure summarizing all analysis.
 
 ```bash
-parakit viz -v all -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -c calls.tsv -d diplotype.paths-stats.tsv -p diplotype.paths-info.tsv -o parakit.out.pdf
+parakit viz -v all -j rccx.grch38_hprc2.mcc.config.json -r reads.gaf.gz -c calls.tsv -d diplotype.paths-stats.tsv -p diplotype.paths-info.tsv -o parakit.out.pdf
 ```
 
 Other modes include
@@ -143,7 +141,7 @@ You can also annotate and visualize long sequences directly, for example assembl
 The following commend will produce a figure similare to `parakit viz`:
 
 ```bash
-parakit annotate -j rccx.grch38_hprc.mc.config.json -f contigs.fasta -o parakit.contigs.pdf
+parakit annotate -j rccx.grch38_hprc2.mcc.config.json -f contigs.fasta -o parakit.contigs.pdf
 ```
 
 ## Output
@@ -188,16 +186,16 @@ Otherwise, only reads that seem to originate from the *gene* module are surjecte
 
 ```sh
 # *gene* subreads only (no tags)
-parakit surject -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -f reads.fastq -o surjected_subreads.bam
+parakit surject -j rccx.grch38_hprc2.mcc.config.json -r reads.gaf.gz -f reads.fastq -o surjected_subreads.bam
 
 # all subreads with haplotype/module tags from the diplotyping result
-parakit surject -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -f reads.fastq -d diplotype.paths-stats.tsv -p diplotype.paths-info.tsv -o surjected_subreads.bam
+parakit surject -j rccx.grch38_hprc2.mcc.config.json -r reads.gaf.gz -f reads.fastq -d diplotype.paths-stats.tsv -p diplotype.paths-info.tsv -o surjected_subreads.bam
 ```
 
 For information, the variants in the pangenome can be listed using `parakit deconstruct`:
 
 ```sh
-parakit deconstruct -j rccx.grch38_hprc.mc.config.json -o rccx.grch38_hprc.mc.decon.tsv
+parakit deconstruct -j rccx.grch38_hprc2.mcc.config.json -o rccx.grch38_hprc.mc.decon.tsv
 ```
 
 This command also creates a BED file (*rccx.grch38_hprc.mc.decon.bed*) that can be loaded in IGV.
@@ -205,7 +203,7 @@ This command also creates a BED file (*rccx.grch38_hprc.mc.decon.bed*) that can 
 Similarly, the variants called by `parakit call` can also be loaded as a BED, for example *calls.bed* produced by:
 
 ```sh
-parakit call -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -o calls.tsv
+parakit call -j rccx.grch38_hprc2.mcc.config.json -r reads.gaf.gz -o calls.tsv
 ```
 
 By loading the surjected BAM and those BED files in IGV, we can investigate the result of the diplotyping and explore potential new variants that were absent from the pangenome. 
@@ -263,13 +261,13 @@ These are reads that cover the variants identified but support the reference all
 To make that figure, run something like:
 
 ```sh
-parakit viz -v calls -j rccx.grch38_hprc.mc.config.json -r reads.gaf.gz -c calls.tsv -o parakit.calls.pdf
+parakit viz -v calls -j rccx.grch38_hprc2.mcc.config.json -r reads.gaf.gz -c calls.tsv -o parakit.calls.pdf
 ```
 
 Note: to get quick stats about the reads aligning to the pangenome, run
 
 ```sh
-parakit gafstats -r reads.gaf.gz -j rccx.grch38_hprc.mc.config.json
+parakit gafstats -r reads.gaf.gz -j rccx.grch38_hprc2.mcc.config.json
 ```
 
 ## Next
