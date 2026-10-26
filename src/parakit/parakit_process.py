@@ -474,13 +474,13 @@ def runRscript(script_r, args):
         rscript_cmd += ['-m', str(args.m)]
 
     # check input arguments
-    if v_mode in ['all', 'calls', 'all_small']:
+    if v_mode in ['all', 'calls', 'all_small', 'calls_dip']:
         if args.c == '':
             print('This visualization mode requires calls input (-c).')
             exit(1)
         rscript_cmd += ['-c', args.c]
     # check that there are calls to display
-    if v_mode == 'calls':
+    if v_mode in ['calls', 'calls_dip']:
         ncalls = 0
         with open(args.c, 'rt') as inf:
             for line in inf:
@@ -491,7 +491,7 @@ def runRscript(script_r, args):
             pdf_f.close()
             print('No calls to display')
             return (True)
-    if v_mode in ['all', 'all_small', 'calls', 'allele_support', 'annotate']:
+    if v_mode in ['all', 'all_small', 'calls', 'calls_dip', 'allele_support', 'annotate']:
         # load node info
         nodes = pkio.readNodeInfo(args.n)
         # read sequences
@@ -525,13 +525,13 @@ def runRscript(script_r, args):
                     outf.write(tout)
         outf.close()
         rscript_cmd += ['-r', reads_fn]
-    if v_mode in ['all', 'all_small', 'diplotype']:
+    if v_mode in ['all', 'all_small', 'diplotype', 'calls_dip']:
         if args.d == '' or args.p == '':
             print('This visualization mode requires paths input (-d and -p).')
             exit(1)
         rscript_cmd += ['-d', args.d, '-p', args.p, '--dip', str(args.dip)]
         # check that there are diplotype to display
-        if v_mode == 'diplotype':
+        if v_mode in ['diplotype', 'calls_dip']:
             npaths = 0
             with open(args.d, 'rt') as inf:
                 for line in inf:
@@ -544,6 +544,8 @@ def runRscript(script_r, args):
                 return (True)
     if 'l' in args and args.l != '':
         rscript_cmd += ['-l', args.l]
+    if 'height' in args and args.height is not None:
+        rscript_cmd += ['--height', str(args.height)]
 
     if args.t:
         print('Running: ', ' '.join(rscript_cmd))

@@ -22,6 +22,7 @@ args$label = list(arg='-l', desc='a label to use as title of the graphs', val=''
 args$hstats = list(arg='-d', desc='diplotype paths, sorted')
 args$hpaths = list(arg='-p', desc='haplotype paths information')
 args$dipid = list(arg='--dip', desc='diplotype index', val=1)
+args$height = list(arg='--height', desc='PDF height', val=NA)
 args$out = list(arg='-o', desc='output PDF file', val='parakit.viz.pdf')
 
 ## parse arguments
@@ -122,7 +123,7 @@ ninfo$pos = ninfo$pos + reg.offset
 
 ## load read information
 reads.df = NULL
-if(args$viz$val %in% c('calls', 'all', 'all_small', 'allele_support', 'annotate')){
+if(args$viz$val %in% c('calls', 'all', 'all_small', 'allele_support', 'annotate', 'calls_dip')){
   reads.df = read.table(args$reads$val, as.is=TRUE, header=TRUE, comment.char="", sep='\t') %>%
     merge(ninfo)
 }
@@ -161,7 +162,7 @@ callsGraph <- function(vars){
   ## }
 
   ## add the most 'normal'-looking reads to the call figure
-  if(args$viz$val == 'calls' || as.numeric(args$nreads$val) == 1){
+  if(args$viz$val %in% c('calls', 'calls_dip') || as.numeric(args$nreads$val) == 1){
     norm.reads = vars %>% group_by(read) %>%
       summarize(nref=sum(allele=='ref', na.rm=TRUE),
                 nalt=sum(allele=='alt', na.rm=TRUE), .groups='drop') %>%
@@ -236,7 +237,7 @@ callsGraph <- function(vars){
   return(list(ggp.reads=ggp.reads, xlims_v=xlims_v, var.vl=var.vl, output=TRUE))
 }
 
-if(args$viz$val %in% c('calls', 'all', 'all_small')){
+if(args$viz$val %in% c('calls', 'all', 'all_small', 'calls_dip')){
 
   vars.head = vars = scan(args$calls$val, '', quiet=TRUE, n=1)
   if (length(vars.head) > 0){
@@ -537,7 +538,7 @@ diplotypeGraph <- function(stats, haps){
   return(list(ggp.haps.s=ggp.haps.s, ggp.haps=ggp.haps, xlims_v=xlims_v))
 }
 
-if(args$viz$val %in% c('diplotype', 'all', 'all_small')){
+if(args$viz$val %in% c('diplotype', 'all', 'all_small', 'calls_dip')){
   ## load stats on pairs of predicted haplotypes
   stats = read.table(args$hstats$val, as.is=TRUE, header=TRUE)
   ## stats = stats %>% arrange(desc(cov_cor_adj + aln_score_adj))
@@ -765,6 +766,10 @@ nox = theme(axis.text.x=element_blank(), axis.title.x=element_blank())
 ## put the panels together
 pdf.h = ifelse(args$viz$val == 'all', 9, 6)
 pdf.h = ifelse(args$viz$val == 'diplotype', 4, pdf.h)
+if(!is.na(args$height$val)) {
+  pdf.h = as.numeric(args$height$val)
+}
+
 pdf(args$out$val, 9, pdf.h)
 
 if(args$viz$val == 'allele_support'){
@@ -789,6 +794,16 @@ if(args$viz$val == 'diplotype'){
             ggp$genes + ggp.xlims + labs(caption=args$label$val),
             ncol=1, align='v', rel_heights=c(2,1))
 }
+
+if(args$viz$val == 'calls_dip'){
+  plot_grid(ggp$reads + 
+            ggp.xlims + nox,
+            ggp$haps.s + guides(alpha=FALSE, color=FALSE) +
+            ggp.xlims + nox,
+            ggp$genes + ggp.xlims + labs(caption=args$label$val),
+            ncol=1, align='v', rel_heights=c(4,2,1.5))
+}
+
 
 if(args$viz$val == 'annotate'){
   plot_grid(ggp$annot2 +

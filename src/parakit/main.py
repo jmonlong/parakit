@@ -365,6 +365,7 @@ pars_viz.add_argument('-d', help='diplotype paths, sorted', default='')
 pars_viz.add_argument('-p', help='haplotype paths information', default='')
 pars_viz.add_argument('-l', help='a label to use as title of the graphs.',
                       default='')
+pars_viz.add_argument('--height', help='PDF height', default=None, type=int)
 pars_viz.add_argument('-m', help='maximum number of supporting reads to '
                       'show in graph', default=3)
 pars_viz.add_argument('-o', help='output PDF file', default='parakit.viz.pdf')
